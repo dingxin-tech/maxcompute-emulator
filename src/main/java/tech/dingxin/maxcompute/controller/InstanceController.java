@@ -1,0 +1,98 @@
+package tech.dingxin.maxcompute.controller;
+
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.bind.annotation.RestController;
+import tech.dingxin.maxcompute.common.MessageResponse;
+import tech.dingxin.maxcompute.entity.Instance;
+import tech.dingxin.maxcompute.entity.InstanceResultModel;
+import tech.dingxin.maxcompute.entity.InstanceStatusModel;
+import tech.dingxin.maxcompute.utils.CommonUtils;
+import tech.dingxin.maxcompute.utils.SqlRunner;
+import tech.dingxin.maxcompute.utils.XmlUtils;
+
+import java.net.URI;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+
+import static com.aliyun.odps.rest.SimpleXmlUtils.marshal;
+
+/**
+ * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
+ */
+@RestController
+public class InstanceController {
+    Map<String, String> instanceResultMap;
+
+    public InstanceController() {
+        instanceResultMap = new HashMap<>();
+    }
+
+    @PostMapping("/projects/{projectName}/instances")
+    @ResponseBody
+    public ResponseEntity<Object> createInstance(
+            @PathVariable("projectName") String projectName,
+            @RequestParam("curr_project") String currProject,
+            @RequestBody String body) {
+
+        Instance instance = XmlUtils.parseInstance(body);
+        String query = instance.getJob().getTasks().getSql().getQuery();
+        String result = SqlRunner.execute(query);
+        String instanceId = CommonUtils.generateUUID();
+        instanceResultMap.put(instanceId, result);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setLocation(URI.create("/" + instanceId));
+        return new ResponseEntity<>(new MessageResponse("Created"), headers, HttpStatus.CREATED);
+
+    }
+
+    @GetMapping("/projects/{projectName}/instances/{instanceId}")
+    @ResponseBody
+    public ResponseEntity<Object> getInstance(@PathVariable("projectName") String projectName,
+                                              @PathVariable("instanceId") String instanceId,
+                                              @RequestParam("curr_project") String currProject) throws Exception {
+
+        HttpHeaders headers = new HttpHeaders();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US)
+                .withZone(java.time.ZoneId.of("GMT"));
+
+        String dateString = formatter.format(ZonedDateTime.now());
+        headers.set("x-odps-start-time", dateString);
+        headers.set("x-odps-end-time", dateString);
+        headers.set("x-odps-request-id", instanceId);
+        headers.set("x-odps-owner", "MaxCompute Simulator");
+
+        return new ResponseEntity<>(marshal(new InstanceStatusModel()), headers, HttpStatus.OK);
+    }
+
+    @GetMapping(value = "/projects/{projectName}/instances/{instanceId}", params = "taskstatus")
+    @ResponseBody
+    public String checkInstanceStatus(@PathVariable("projectName") String projectName,
+                                      @PathVariable("instanceId") String instanceId,
+                                      @RequestParam("curr_project") String currProject) {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+                "<Instance><Status>Terminated</Status><Tasks><Task Type=\"SQL\"><Name>AnonymousSQLTask</Name><StartTime>Sat, " +
+                "11 May 2024 02:08:18 GMT</StartTime><EndTime>Sat, 11 May 2024 02:08:29 GMT</EndTime><Status>Success</Status><Histories/></Task></Tasks></Instance>";
+    }
+
+    @GetMapping(value = "/projects/{projectName}/instances/{instanceId}", params = "result")
+    @ResponseBody
+    public String getInstanceResult(@PathVariable("projectName") String projectName,
+                                    @PathVariable("instanceId") String instanceId,
+                                    @RequestParam("curr_project") String currProject) throws Exception {
+        String marshal = marshal(new InstanceResultModel(instanceResultMap.get(instanceId)));
+        System.out.println(marshal);
+        return marshal;
+    }
+}
