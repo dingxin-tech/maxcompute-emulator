@@ -1,6 +1,7 @@
 package tech.dingxin.maxcompute.utils;
 
 import org.junit.jupiter.api.Test;
+import tech.dingxin.maxcompute.service.TableService;
 
 import java.sql.SQLException;
 
@@ -22,5 +23,11 @@ public class SqlRunnerTest {
         String sqlSelect = "SELECT * FROM students;";
         String resultSet = SqlRunner.executeQuery(sqlSelect);
         System.out.println(resultSet);
+    }
+
+    @Test
+    public void testDescTable() throws SQLException {
+        TableService tableService = new TableService();
+        tableService.reloadTable("students");
     }
 }

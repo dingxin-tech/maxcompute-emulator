@@ -1,6 +1,6 @@
 package tech.dingxin.maxcompute.utils;
 
-import tech.dingxin.maxcompute.entity.Instance;
+import tech.dingxin.maxcompute.entity.internal.instance.Instance;
 
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;

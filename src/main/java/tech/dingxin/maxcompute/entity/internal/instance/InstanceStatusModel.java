@@ -1,4 +1,4 @@
-package tech.dingxin.maxcompute.entity;
+package tech.dingxin.maxcompute.entity.internal.instance;
 
 import com.aliyun.odps.rest.SimpleXmlUtils;
 import com.aliyun.odps.simpleframework.xml.Element;

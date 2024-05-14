@@ -1,4 +1,4 @@
-package tech.dingxin.maxcompute.entity;
+package tech.dingxin.maxcompute.entity.internal.instance;
 
 import javax.xml.bind.annotation.XmlElement;
 

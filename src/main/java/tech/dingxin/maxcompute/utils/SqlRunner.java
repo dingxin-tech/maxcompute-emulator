@@ -4,8 +4,6 @@ import com.csvreader.CsvWriter;
 
 import java.io.IOException;
 import java.io.StringWriter;
-import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
@@ -14,25 +12,15 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static tech.dingxin.maxcompute.utils.CommonUtils.getConnection;
+
 /**
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
  */
 public class SqlRunner {
 
-    private static final String URL = "jdbc:sqlite:/tmp/maxcompute-emulator.db";
-    private static final String DRIVER = "org.sqlite.JDBC";
-    private static final String MODE = "always";
-
-    static Connection connection;
-
-    private static Connection getConnection() throws SQLException {
-        if (connection == null || connection.isClosed()) {
-            connection = DriverManager.getConnection(URL);
-        }
-        return connection;
-    }
-
-    public static String execute(String sql) {
+    public static String execute(String originSql) {
+        String sql = convertToMcSql(originSql);
 
         try (Statement stmt = getConnection().createStatement()) {
             System.out.println("execute sql: " + sql);
@@ -45,9 +33,13 @@ public class SqlRunner {
                 return "";
             }
         } catch (Exception e) {
-            System.out.println(e.getMessage());
-            return "";
+            return e.getMessage();
         }
+    }
+
+    private static String convertToMcSql(String originSql) {
+        // TODO: convert sqllite to maxcompute sql
+        return originSql;
     }
 
     public static String executeQuery(String sql) {

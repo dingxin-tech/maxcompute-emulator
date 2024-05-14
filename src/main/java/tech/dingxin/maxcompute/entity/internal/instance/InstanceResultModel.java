@@ -1,4 +1,4 @@
-package tech.dingxin.maxcompute.entity;
+package tech.dingxin.maxcompute.entity.internal.instance;
 
 import com.aliyun.odps.rest.SimpleXmlUtils;
 import com.aliyun.odps.simpleframework.xml.Attribute;
@@ -9,7 +9,6 @@ import com.aliyun.odps.simpleframework.xml.Text;
 import com.aliyun.odps.simpleframework.xml.convert.Convert;
 import org.apache.commons.codec.binary.Base64;
 
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -95,14 +94,15 @@ public class InstanceResultModel {
         }
     }
 
-    public InstanceResultModel(String result) throws SQLException {
+    public void addTaskResult(String taskName, String result) {
         TaskResult taskResult = new TaskResult();
         taskResult.type = "SQL";
-        taskResult.name = "AnonymousSQLTask";
+        taskResult.name = taskName;
         taskResult.result = new Result();
         taskResult.result.format = "csv";
         taskResult.result.text = result;
         taskResult.status = "Success";
         taskResults.add(taskResult);
     }
+
 }

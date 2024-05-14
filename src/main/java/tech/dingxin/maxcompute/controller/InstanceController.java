@@ -1,5 +1,8 @@
 package tech.dingxin.maxcompute.controller;
 
+import com.aliyun.odps.Job;
+import com.aliyun.odps.OdpsException;
+import com.aliyun.odps.task.SQLTask;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -11,9 +14,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 import tech.dingxin.maxcompute.common.MessageResponse;
-import tech.dingxin.maxcompute.entity.Instance;
-import tech.dingxin.maxcompute.entity.InstanceResultModel;
-import tech.dingxin.maxcompute.entity.InstanceStatusModel;
+import tech.dingxin.maxcompute.entity.SQLResult;
+import tech.dingxin.maxcompute.entity.internal.instance.Instance;
+import tech.dingxin.maxcompute.entity.internal.instance.InstanceResultModel;
+import tech.dingxin.maxcompute.entity.internal.instance.InstanceStatusModel;
+import tech.dingxin.maxcompute.entity.internal.instance.SQL;
 import tech.dingxin.maxcompute.utils.CommonUtils;
 import tech.dingxin.maxcompute.utils.SqlRunner;
 import tech.dingxin.maxcompute.utils.XmlUtils;
@@ -32,7 +37,7 @@ import static com.aliyun.odps.rest.SimpleXmlUtils.marshal;
  */
 @RestController
 public class InstanceController {
-    Map<String, String> instanceResultMap;
+    Map<String, Map<String, SQLResult>> instanceResultMap;
 
     public InstanceController() {
         instanceResultMap = new HashMap<>();
@@ -46,15 +51,18 @@ public class InstanceController {
             @RequestBody String body) {
 
         Instance instance = XmlUtils.parseInstance(body);
-        String query = instance.getJob().getTasks().getSql().getQuery();
+        SQL sql = instance.getJob().getTasks().getSql();
+        String name = sql.getName();
+        String query = sql.getQuery();
+
         String result = SqlRunner.execute(query);
         String instanceId = CommonUtils.generateUUID();
-        instanceResultMap.put(instanceId, result);
+        instanceResultMap.putIfAbsent(instanceId, new HashMap<>());
+        instanceResultMap.get(instanceId).put(name, new SQLResult(query, result));
 
         HttpHeaders headers = new HttpHeaders();
         headers.setLocation(URI.create("/" + instanceId));
         return new ResponseEntity<>(new MessageResponse("Created"), headers, HttpStatus.CREATED);
-
     }
 
     @GetMapping("/projects/{projectName}/instances/{instanceId}")
@@ -86,12 +94,34 @@ public class InstanceController {
                 "11 May 2024 02:08:18 GMT</StartTime><EndTime>Sat, 11 May 2024 02:08:29 GMT</EndTime><Status>Success</Status><Histories/></Task></Tasks></Instance>";
     }
 
+    @GetMapping(value = "/projects/{projectName}/instances/{instanceId}", params = "source")
+    @ResponseBody
+    public String getJob(@PathVariable("projectName") String projectName,
+                         @PathVariable("instanceId") String instanceId) throws OdpsException {
+        Job job = new Job();
+        Map<String, SQLResult> results = instanceResultMap.get(instanceId);
+        if (results == null) {
+            return job.toXmlString();
+        }
+        results.entrySet().forEach(entry -> {
+            SQLTask sqlTask = new SQLTask();
+            sqlTask.setName(entry.getKey());
+            sqlTask.setQuery(entry.getValue().getQuery());
+            job.addTask(sqlTask);
+        });
+        return job.toXmlString();
+    }
+
     @GetMapping(value = "/projects/{projectName}/instances/{instanceId}", params = "result")
     @ResponseBody
     public String getInstanceResult(@PathVariable("projectName") String projectName,
                                     @PathVariable("instanceId") String instanceId,
                                     @RequestParam("curr_project") String currProject) throws Exception {
-        String marshal = marshal(new InstanceResultModel(instanceResultMap.get(instanceId)));
+        InstanceResultModel instanceResultModel = new InstanceResultModel();
+        Map<String, SQLResult> results = instanceResultMap.get(instanceId);
+        results.entrySet()
+                .forEach(entry -> instanceResultModel.addTaskResult(entry.getKey(), entry.getValue().getResult()));
+        String marshal = marshal(instanceResultModel);
         System.out.println(marshal);
         return marshal;
     }

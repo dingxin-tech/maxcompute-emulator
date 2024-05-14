@@ -1,7 +1,7 @@
 package tech.dingxin.maxcompute.utils;
 
 import org.junit.jupiter.api.Test;
-import tech.dingxin.maxcompute.entity.Instance;
+import tech.dingxin.maxcompute.entity.internal.instance.Instance;
 
 /**
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
