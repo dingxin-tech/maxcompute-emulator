@@ -8,9 +8,12 @@ import org.springframework.stereotype.Service;
 import tech.dingxin.maxcompute.utils.CommonUtils;
 import tech.dingxin.maxcompute.utils.TypeConvertUtils;
 
+import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
@@ -19,6 +22,7 @@ import java.sql.Statement;
 public class TableService {
     public String reloadTable(String tableName) {
         JsonObject table = new JsonObject();
+        table.add("lastDDLTime", new JsonPrimitive(System.currentTimeMillis() / 1000));
 
         JsonArray columns = new JsonArray();
         JsonArray primaryKey = new JsonArray();
@@ -48,6 +52,24 @@ public class TableService {
         table.add("Reserved", new JsonPrimitive(reverseInfo.toString()));
 
         return table.toString();
+    }
+
+    public List<String> listTables() {
+        List<String> tables = new ArrayList<>();
+        try (
+                Connection conn = CommonUtils.getConnection();
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(
+                        "SELECT name FROM sqlite_master WHERE type ='table' AND name NOT LIKE 'sqlite_%';")
+        ) {
+            while (rs.next()) {
+                tables.add(rs.getString("name"));
+            }
+        } catch (SQLException e) {
+            System.out.println("Database error:");
+            e.printStackTrace();
+        }
+        return tables;
     }
 
     private JsonObject toJson(String columnName, TypeInfo typeInfo, boolean notNull, String defaultValue) {

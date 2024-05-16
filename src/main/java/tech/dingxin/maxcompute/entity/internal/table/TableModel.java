@@ -6,7 +6,6 @@ import com.aliyun.odps.simpleframework.xml.Element;
 import com.aliyun.odps.simpleframework.xml.Root;
 import com.aliyun.odps.simpleframework.xml.Text;
 import com.aliyun.odps.simpleframework.xml.convert.Convert;
-import lombok.Builder;
 import lombok.Data;
 
 import java.util.Date;
@@ -27,6 +26,10 @@ public class TableModel {
     @Element(name = "Name", required = false)
     @Convert(SimpleXmlUtils.EmptyStringConverter.class)
     String name;
+
+    @Element(name = "Owner", required = false)
+    @Convert(SimpleXmlUtils.EmptyStringConverter.class)
+    String owner;
 
     @Element(name = "Schema", required = false)
     private Schema schema;
@@ -54,6 +57,7 @@ public class TableModel {
         this.createdTime = new Date();
         this.lastModifiedTime = new Date();
         this.lastAccessTime = new Date();
+        this.owner = "MaxCompute Emulator";
         this.type = Table.TableType.MANAGED_TABLE;
     }
 }

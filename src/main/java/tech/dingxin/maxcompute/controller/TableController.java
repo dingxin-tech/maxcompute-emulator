@@ -3,8 +3,10 @@ package tech.dingxin.maxcompute.controller;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import tech.dingxin.maxcompute.entity.internal.table.ListTablesResponse;
 import tech.dingxin.maxcompute.entity.internal.table.TableModel;
 import tech.dingxin.maxcompute.service.TableService;
 
@@ -30,6 +32,13 @@ public class TableController {
     public String getInstance(@PathVariable("projectName") String projectName,
                               @PathVariable("schemaName") String schemaName,
                               @PathVariable("tableId") String tableId) throws Exception {
-        return marshal(new TableModel(tableId, tableService.reloadTable(tableId).toString()));
+        return marshal(new TableModel(tableId, tableService.reloadTable(tableId)));
+    }
+
+    @GetMapping("/projects/{projectName}/tables")
+    @ResponseBody
+    public String listTable(@PathVariable("projectName") String projectName,
+                            @RequestParam("expectmarker") boolean expectmarker) throws Exception {
+        return marshal(new ListTablesResponse(tableService.listTables()));
     }
 }
