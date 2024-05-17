@@ -1,9 +1,12 @@
 package tech.dingxin.maxcompute.utils;
 
 import com.csvreader.CsvWriter;
+import tech.dingxin.maxcompute.entity.SqlLiteColumn;
 
 import java.io.IOException;
 import java.io.StringWriter;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
@@ -34,6 +37,51 @@ public class SqlRunner {
             }
         } catch (Exception e) {
             return e.getMessage();
+        }
+    }
+
+    public static void upsertData(String tableName, List<Object[]> datas, List<SqlLiteColumn> schema) {
+        // 构建基础的 INSERT 语句
+        StringBuilder sql = new StringBuilder("INSERT INTO ");
+        sql.append(tableName);
+        sql.append(" (");
+        sql.append(String.join(", ", schema.stream().map(SqlLiteColumn::getName).toArray(String[]::new)));
+        sql.append(") VALUES (");
+        sql.append(String.join(", ", "?".repeat(schema.size()).split("")));
+        sql.append(")");
+
+        // 添加 ON CONFLICT ... DO UPDATE SET 子句
+        sql.append(" ON CONFLICT (");
+        sql.append(String.join(", ", schema.stream().filter(SqlLiteColumn::isPrimaryKey).map(SqlLiteColumn::getName)
+                .toArray(String[]::new)));
+        sql.append(") DO UPDATE SET ");
+
+        // 排除 keyColumnNames，仅更新非键列
+        for (SqlLiteColumn columns : schema) {
+            if (!columns.isPrimaryKey()) {
+                sql.append(columns.getName()).append(" = excluded.").append(columns.getName()).append(", ");
+            }
+        }
+        // 移除最后的逗号和空格
+        sql.setLength(sql.length() - 2);
+
+        // 获取数据库连接并执行INSERT语句
+        try (Connection conn = CommonUtils.getConnection();
+                PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
+
+            for (Object[] rowData : datas) {
+                // 绑定参数到PreparedStatement
+                for (int i = 0; i < rowData.length; i++) {
+                    pstmt.setObject(i + 1, rowData[i]);
+                }
+                // 添加到批次
+                pstmt.addBatch();
+            }
+            // 执行INSERT操作
+            pstmt.executeUpdate();
+        } // try-with-resources将自动关闭资源
+        catch (SQLException e) {
+            throw new RuntimeException(e);
         }
     }
 

@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import org.springframework.stereotype.Service;
+import tech.dingxin.maxcompute.entity.SqlLiteColumn;
 import tech.dingxin.maxcompute.utils.CommonUtils;
 import tech.dingxin.maxcompute.utils.TypeConvertUtils;
 
@@ -26,22 +27,14 @@ public class TableService {
 
         JsonArray columns = new JsonArray();
         JsonArray primaryKey = new JsonArray();
-        try (Statement stmt = CommonUtils.getConnection().createStatement()) {
-            ResultSet rs = stmt.executeQuery("PRAGMA table_info('" + tableName + "')");
 
-            while (rs.next()) {
-                String name = rs.getString("name");
-                String type = rs.getString("type");
-                boolean notnull = rs.getBoolean("notnull");
-                String dfltValue = rs.getString("dflt_value");
-                boolean pk = rs.getBoolean("pk");
-                columns.add(toJson(name, TypeConvertUtils.convertToMaxComputeType(type), notnull, dfltValue));
-                if (pk) {
-                    primaryKey.add(new JsonPrimitive(name));
-                }
+        List<SqlLiteColumn> schema = getSchema(tableName);
+        for (SqlLiteColumn column : schema) {
+            columns.add(toJson(column.getName(), TypeConvertUtils.convertToMaxComputeType(column.getType()),
+                    column.isNotNull(), column.getDefaultValue()));
+            if (column.isPrimaryKey()) {
+                primaryKey.add(new JsonPrimitive(column.getName()));
             }
-        } catch (SQLException e) {
-            e.printStackTrace();
         }
         table.add("columns", columns);
 
@@ -52,6 +45,25 @@ public class TableService {
         table.add("Reserved", new JsonPrimitive(reverseInfo.toString()));
 
         return table.toString();
+    }
+
+    public List<SqlLiteColumn> getSchema(String tableName) {
+        List<SqlLiteColumn> columns = new ArrayList<>();
+        try (Statement stmt = CommonUtils.getConnection().createStatement()) {
+            ResultSet rs = stmt.executeQuery("PRAGMA table_info('" + tableName + "')");
+
+            while (rs.next()) {
+                String name = rs.getString("name");
+                String type = rs.getString("type");
+                boolean notnull = rs.getBoolean("notnull");
+                String dfltValue = rs.getString("dflt_value");
+                boolean pk = rs.getBoolean("pk");
+                columns.add(new SqlLiteColumn(name, type, notnull, dfltValue, pk));
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return columns;
     }
 
     public List<String> listTables() {
