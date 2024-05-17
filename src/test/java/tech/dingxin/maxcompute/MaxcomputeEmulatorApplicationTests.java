@@ -3,6 +3,7 @@ package tech.dingxin.maxcompute;
 import com.aliyun.odps.Instance;
 import com.aliyun.odps.Odps;
 import com.aliyun.odps.OdpsException;
+import com.aliyun.odps.Table;
 import com.aliyun.odps.TableSchema;
 import com.aliyun.odps.account.Account;
 import com.aliyun.odps.account.AliyunAccount;
@@ -14,6 +15,7 @@ import com.aliyun.odps.tunnel.streams.UpsertStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import java.util.Iterator;
 import java.util.List;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
@@ -64,5 +66,44 @@ class MaxcomputeEmulatorApplicationTests {
         stream.flush();
 
         session.commit(false);
+    }
+
+    @Test
+    void testGetProject() throws Exception {
+        Odps odps = getTestOdps();
+        boolean flag =
+                Boolean.parseBoolean(
+                        odps.projects().get().getProperty("odps.schema.model.enabled"));
+        System.out.println(flag);
+    }
+
+    @Test
+    void testTableExist() throws OdpsException {
+        Odps odps = getTestOdps();
+        boolean exists = odps.tables().exists("students");
+        System.out.println(exists);
+
+        exists = odps.tables().exists("project");
+        System.out.println(exists);
+    }
+
+    @Test
+    void testShowTables() throws OdpsException {
+        Odps odps = getTestOdps();
+        Iterator<Table> iterator = odps.tables().iterator();
+        while (iterator.hasNext()) {
+            Table table = iterator.next();
+            System.out.println(table.getName());
+        }
+    }
+
+    @Test
+    void testExecuteCreateTableSql() throws OdpsException {
+        Odps odps = getTestOdps();
+
+        Instance run = SQLTask.run(odps,
+                "CREATE TABLE IF NOT EXISTS mocked_mc.table1 (`col1` STRING NOT NULL COMMENT 'STRING',`col2` STRING COMMENT 'STRING', PRIMARY KEY(`col1`)) " +
+                        "TBLPROPERTIES('transactional'='true','write.bucket.num'='16');");
+        run.waitForSuccess();
     }
 }

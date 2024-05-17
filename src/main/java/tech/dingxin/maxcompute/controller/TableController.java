@@ -1,6 +1,8 @@
 package tech.dingxin.maxcompute.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -22,23 +24,32 @@ public class TableController {
 
     @GetMapping("/projects/{projectName}/tables/{tableId}")
     @ResponseBody
-    public String getInstance(@PathVariable("projectName") String projectName,
-                              @PathVariable("tableId") String tableId) throws Exception {
-        return marshal(new TableModel(tableId, tableService.reloadTable(tableId).toString()));
+    public ResponseEntity<String> getTable(@PathVariable("projectName") String projectName,
+                                           @PathVariable("tableId") String tableId) throws Exception {
+        if (!tableService.tableExist(tableId)) {
+            return new ResponseEntity<>("table " + tableId + " not found", null, HttpStatus.NOT_FOUND);
+        }
+        String responce = marshal(new TableModel(tableId, tableService.reloadTable(tableId)));
+        return ResponseEntity.ok(responce);
     }
 
     @GetMapping("/projects/{projectName}/schemas/{schemaName}/tables/{tableId}")
     @ResponseBody
-    public String getInstance(@PathVariable("projectName") String projectName,
-                              @PathVariable("schemaName") String schemaName,
-                              @PathVariable("tableId") String tableId) throws Exception {
-        return marshal(new TableModel(tableId, tableService.reloadTable(tableId)));
+    public ResponseEntity<String> getTable(@PathVariable("projectName") String projectName,
+                                           @PathVariable("schemaName") String schemaName,
+                                           @PathVariable("tableId") String tableId) throws Exception {
+        if (!tableService.tableExist(tableId)) {
+            return new ResponseEntity<>("table " + tableId + " not found", null, HttpStatus.NOT_FOUND);
+        }
+        String responce = marshal(new TableModel(tableId, tableService.reloadTable(tableId)));
+        return ResponseEntity.ok(responce);
     }
 
     @GetMapping("/projects/{projectName}/tables")
     @ResponseBody
-    public String listTable(@PathVariable("projectName") String projectName,
-                            @RequestParam("expectmarker") boolean expectmarker) throws Exception {
-        return marshal(new ListTablesResponse(tableService.listTables()));
+    public ResponseEntity<String> listTable(@PathVariable("projectName") String projectName,
+                                            @RequestParam("expectmarker") boolean expectmarker) throws Exception {
+        String responce = marshal(new ListTablesResponse(tableService.listTables()));
+        return ResponseEntity.ok(responce);
     }
 }

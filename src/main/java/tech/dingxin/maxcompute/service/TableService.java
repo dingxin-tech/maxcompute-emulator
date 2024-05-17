@@ -10,6 +10,7 @@ import tech.dingxin.maxcompute.utils.CommonUtils;
 import tech.dingxin.maxcompute.utils.TypeConvertUtils;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -45,6 +46,20 @@ public class TableService {
         table.add("Reserved", new JsonPrimitive(reverseInfo.toString()));
 
         return table.toString();
+    }
+
+    public boolean tableExist(String tableName) throws SQLException {
+        final String query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?";
+
+        // 用try-with-resources语法自动关闭资源
+        try (Connection conn = CommonUtils.getConnection();
+                PreparedStatement pstmt = conn.prepareStatement(query)) {
+            pstmt.setString(1, tableName);
+
+            try (ResultSet resultSet = pstmt.executeQuery()) {
+                return resultSet.next();
+            }
+        }
     }
 
     public List<SqlLiteColumn> getSchema(String tableName) {

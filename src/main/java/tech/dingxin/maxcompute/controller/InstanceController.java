@@ -24,6 +24,7 @@ import tech.dingxin.maxcompute.utils.SqlRunner;
 import tech.dingxin.maxcompute.utils.XmlUtils;
 
 import java.net.URI;
+import java.sql.SQLException;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
@@ -48,7 +49,7 @@ public class InstanceController {
     public ResponseEntity<Object> createInstance(
             @PathVariable("projectName") String projectName,
             @RequestParam("curr_project") String currProject,
-            @RequestBody String body) {
+            @RequestBody String body) throws SQLException {
 
         Instance instance = XmlUtils.parseInstance(body);
         SQL sql = instance.getJob().getTasks().getSql();
@@ -70,7 +71,6 @@ public class InstanceController {
     public ResponseEntity<Object> getInstance(@PathVariable("projectName") String projectName,
                                               @PathVariable("instanceId") String instanceId,
                                               @RequestParam("curr_project") String currProject) throws Exception {
-
         HttpHeaders headers = new HttpHeaders();
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US)
                 .withZone(java.time.ZoneId.of("GMT"));

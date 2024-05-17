@@ -22,8 +22,8 @@ import static tech.dingxin.maxcompute.utils.CommonUtils.getConnection;
  */
 public class SqlRunner {
 
-    public static String execute(String originSql) {
-        String sql = convertToMcSql(originSql);
+    public static String execute(String originSql) throws SQLException {
+        String sql = convertMCSqlToSQLite(originSql);
 
         try (Statement stmt = getConnection().createStatement()) {
             System.out.println("execute sql: " + sql);
@@ -35,8 +35,8 @@ public class SqlRunner {
                 int updateCount = stmt.getUpdateCount();
                 return "";
             }
-        } catch (Exception e) {
-            return e.getMessage();
+        } catch (IOException e) {
+            throw new SQLException(e);
         }
     }
 
@@ -85,9 +85,31 @@ public class SqlRunner {
         }
     }
 
-    private static String convertToMcSql(String originSql) {
-        // TODO: convert sqllite to maxcompute sql
-        return originSql;
+    public static String convertMCSqlToSQLite(String mcSql) {
+        // Remove all COMMENT clauses considering backticks
+        String noComments = mcSql.replaceAll("\\s+COMMENT\\s+'[^']+'", "");
+
+        // Remove database prefix before the table name (if present)
+        // \S+ matches one or more non-space characters
+        // \. matches the literal dot character
+        // This assumes that the database name does not contain spaces
+        String noDatabasePrefix =
+                noComments.replaceAll("CREATE TABLE IF NOT EXISTS \\S+\\.", "CREATE TABLE IF NOT EXISTS ");
+        noDatabasePrefix = noDatabasePrefix.replaceAll("CREATE TABLE \\S+\\.", "CREATE TABLE ");
+
+        // Remove unsupported TBLPROPERTIES part
+        String noTblProperties = noDatabasePrefix.replaceAll("TBLPROPERTIES\\s*\\([^\\)]+\\)", "");
+
+        // Adjust data types (if necessary)
+        String sqliteCompatibleTypes = noTblProperties.replace("STRING", "TEXT");
+
+        // Ensure the statement ends with a semicolon
+        String withSemicolon = sqliteCompatibleTypes.trim();
+        if (!withSemicolon.endsWith(";")) {
+            withSemicolon += ";";
+        }
+
+        return withSemicolon;
     }
 
     public static String executeQuery(String sql) {
