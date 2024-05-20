@@ -13,12 +13,8 @@ public class CommonUtils {
     }
 
     private static final String URL = "jdbc:sqlite:/tmp/maxcompute-emulator.db";
-    static Connection connection;
 
     public static Connection getConnection() throws SQLException {
-        if (connection == null || connection.isClosed()) {
-            connection = DriverManager.getConnection(URL);
-        }
-        return connection;
+        return DriverManager.getConnection(URL);
     }
 }

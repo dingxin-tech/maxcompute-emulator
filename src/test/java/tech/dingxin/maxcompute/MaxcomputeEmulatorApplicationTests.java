@@ -45,7 +45,7 @@ class MaxcomputeEmulatorApplicationTests {
     @Test
     void getSchema() throws OdpsException {
         Odps odps = getTestOdps();
-        TableSchema schema = odps.tables().get("project", "students").getSchema();
+        TableSchema schema = odps.tables().get("project", "table1").getSchema();
         schema.getAllColumns().stream().forEach(c -> System.out.println(c.getName()));
     }
 
@@ -106,4 +106,56 @@ class MaxcomputeEmulatorApplicationTests {
                         "TBLPROPERTIES('transactional'='true','write.bucket.num'='16');");
         run.waitForSuccess();
     }
+
+    @Test
+    void testExecuteAddColumnSql() throws OdpsException {
+        Odps odps = getTestOdps();
+        Instance run = SQLTask.run(odps,
+                "alter table project.table1 add columns (id BIGINT comment 'BIGINT',name STRING comment 'STRING');");
+        run.waitForSuccess();
+    }
+
+    @Test
+    void testExecuteDropColumnSql() throws OdpsException {
+        Odps odps = getTestOdps();
+        Instance run = SQLTask.run(odps,
+                "ALTER TABLE MOCKED_MC.TABLE1 DROP COLUMNS NEWCOL2;");
+        run.waitForSuccess();
+    }
+
+    @Test
+    void testExecuteChangeColumnSql() throws OdpsException {
+        Odps odps = getTestOdps();
+        Instance run = SQLTask.run(odps,
+                "alter table project.table1 change column id2 id3 STRING;");
+        run.waitForSuccess();
+    }
+
+    @Test
+    void testExecuteRenameColumnSql() throws OdpsException {
+        Odps odps = getTestOdps();
+        Instance run = SQLTask.run(odps, "alter table mocked_mc.table1 change column col3 rename to newCol3;");
+        run.waitForSuccess();
+    }
+
+    @Test
+    void generateLogview() throws OdpsException {
+        Odps odps = getTestOdps();
+        Instance run = SQLTask.run(odps, "select 1;");
+        System.out.println(odps.logview().generateLogView(run, 24));
+    }
+
+    @Test
+    void testReloadTable() throws OdpsException {
+        Odps odps = getTestOdps();
+        Table table = odps.tables().get("project", "table1");
+        boolean transactional = table.isTransactional();
+        TableSchema schema = table.getSchema();
+        boolean partitioned = table.isPartitioned();
+        List<String> primaryKey = table.getPrimaryKey();
+
+
+
+    }
+
 }

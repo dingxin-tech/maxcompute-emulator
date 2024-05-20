@@ -4,9 +4,11 @@ import com.aliyun.odps.type.TypeInfo;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import org.apache.commons.lang.StringUtils;
 import org.springframework.stereotype.Service;
 import tech.dingxin.maxcompute.entity.SqlLiteColumn;
 import tech.dingxin.maxcompute.utils.CommonUtils;
+import tech.dingxin.maxcompute.utils.SqlRunner;
 import tech.dingxin.maxcompute.utils.TypeConvertUtils;
 
 import java.sql.Connection;
@@ -41,44 +43,36 @@ public class TableService {
 
         // reverse info
         JsonObject reverseInfo = new JsonObject();
-        reverseInfo.add("Transactional", new JsonPrimitive(true));
+        reverseInfo.add("Transactional", new JsonPrimitive("true"));
         reverseInfo.add("PrimaryKey", primaryKey);
         table.add("Reserved", new JsonPrimitive(reverseInfo.toString()));
 
         return table.toString();
     }
 
-    public boolean tableExist(String tableName) throws SQLException {
-        final String query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?";
+    public boolean tableExist(String tableName) {
+        try {
+            final String query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?";
+            try (Connection conn = CommonUtils.getConnection();
+                    PreparedStatement pstmt = conn.prepareStatement(query)) {
+                pstmt.setString(1, tableName.toUpperCase());
 
-        // 用try-with-resources语法自动关闭资源
-        try (Connection conn = CommonUtils.getConnection();
-                PreparedStatement pstmt = conn.prepareStatement(query)) {
-            pstmt.setString(1, tableName);
-
-            try (ResultSet resultSet = pstmt.executeQuery()) {
-                return resultSet.next();
+                try (ResultSet resultSet = pstmt.executeQuery()) {
+                    return resultSet.next();
+                }
             }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return false;
         }
     }
 
     public List<SqlLiteColumn> getSchema(String tableName) {
-        List<SqlLiteColumn> columns = new ArrayList<>();
-        try (Statement stmt = CommonUtils.getConnection().createStatement()) {
-            ResultSet rs = stmt.executeQuery("PRAGMA table_info('" + tableName + "')");
-
-            while (rs.next()) {
-                String name = rs.getString("name");
-                String type = rs.getString("type");
-                boolean notnull = rs.getBoolean("notnull");
-                String dfltValue = rs.getString("dflt_value");
-                boolean pk = rs.getBoolean("pk");
-                columns.add(new SqlLiteColumn(name, type, notnull, dfltValue, pk));
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
+        if (StringUtils.isNotEmpty(tableName)) {
+            return SqlRunner.getSchema(tableName);
+        } else {
+            return new ArrayList<>();
         }
-        return columns;
     }
 
     public List<String> listTables() {

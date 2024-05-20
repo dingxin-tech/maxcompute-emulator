@@ -21,7 +21,7 @@ public class SqlRunnerTest {
         SqlRunner.execute(sqlInsert);
 
         String sqlSelect = "SELECT * FROM students;";
-        String resultSet = SqlRunner.executeQuery(sqlSelect);
+        String resultSet = SqlRunner.execute(sqlSelect);
         System.out.println(resultSet);
     }
 
@@ -29,5 +29,11 @@ public class SqlRunnerTest {
     public void testDescTable() throws SQLException {
         TableService tableService = new TableService();
         tableService.reloadTable("students");
+    }
+
+    @Test
+    public void showCreateTable() throws SQLException {
+        String sqlInsert = "show create table students;";
+        System.out.println(SqlRunner.execute(sqlInsert));
     }
 }

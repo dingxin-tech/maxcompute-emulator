@@ -3,6 +3,8 @@ package tech.dingxin.maxcompute.controller;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -36,6 +38,7 @@ import java.util.stream.Collectors;
  */
 @RestController
 public class TunnelController {
+    private static final Logger LOG = LoggerFactory.getLogger(TunnelController.class);
 
     private Map<String, TableId> upsertSessionMap;
 
@@ -53,15 +56,20 @@ public class TunnelController {
             @RequestParam(value = "partition", required = false, defaultValue = "") String partition,
             @RequestParam(value = "upsertid", required = false, defaultValue = "") String upsertId
     ) {
+        if (!tableService.tableExist(tableId)) {
+            return new ResponseEntity<>("table not exist", HttpStatus.NOT_FOUND);
+        }
         JsonObject result = new JsonObject();
         boolean commit = false;
         // sessionId
         if (upsertId.isEmpty()) {
             upsertId = CommonUtils.generateUUID();
             upsertSessionMap.put(upsertId, TableId.of(tableId, partition));
+            LOG.info("create upsert session {} for table {}", upsertId, tableId);
         } else {
             upsertSessionMap.remove(upsertId);
             commit = true;
+            LOG.info("commit upsert session {} ", upsertId, tableId);
         }
 
         result.add("id", new JsonPrimitive(upsertId));
@@ -118,8 +126,57 @@ public class TunnelController {
 
     @GetMapping("/projects/{projectName}/tables/{tableId}/upserts")
     @ResponseBody
-    public String reloadUpsertSession() {
-        return "";
+    public ResponseEntity reloadUpsertSession(@RequestParam("upsertid") String sessionId) {
+        JsonObject result = new JsonObject();
+        // sessionId
+
+        TableId tableId = upsertSessionMap.getOrDefault(sessionId, new TableId());
+
+        result.add("id", new JsonPrimitive(sessionId));
+        // tunnelTableSchema
+        JsonObject schema = new JsonObject();
+        JsonArray columns = new JsonArray();
+        JsonArray hashKeys = new JsonArray();
+
+        List<SqlLiteColumn> sqlLiteSchema = tableService.getSchema(tableId.getTableName());
+        for (int cid = 0; cid < sqlLiteSchema.size(); cid++) {
+            SqlLiteColumn column = sqlLiteSchema.get(cid);
+            JsonObject columnJson = new JsonObject();
+            columnJson.add("name", new JsonPrimitive(column.getName()));
+            columnJson.add("type",
+                    new JsonPrimitive(TypeConvertUtils.convertToMaxComputeType(column.getType()).getTypeName()));
+            columnJson.add("nullable", new JsonPrimitive(column.isNotNull()));
+            columnJson.add("column_id", new JsonPrimitive(cid));
+            columns.add(columnJson);
+            if (column.isPrimaryKey()) {
+                hashKeys.add(new JsonPrimitive(column.getName()));
+            }
+        }
+        schema.add("columns", columns);
+        //TODO: schema.add("partitionKeys", columns);
+        result.add("schema", schema);
+
+        // hash_key
+        result.add("hash_key", hashKeys);
+
+        // hasher
+        result.add("hasher", new JsonPrimitive("default"));
+
+        // slots
+        JsonArray slots = new JsonArray();
+        JsonObject slot = new JsonObject();
+        slot.add("slot_id", new JsonPrimitive(0));
+        JsonArray buckets = new JsonArray();
+        buckets.add(0);
+        slot.add("buckets", buckets);
+        slot.add("worker_addr", new JsonPrimitive("127.0.0.1:8080"));
+        slots.add(slot);
+
+        result.add("slots", slots);
+        result.add("status", new JsonPrimitive(tableId.getTableName() == null ? "committed" : "normal"));
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("x-odps-request-id", sessionId);
+        return new ResponseEntity<>(result.toString(), headers, HttpStatus.OK);
     }
 
     @PutMapping("/projects/{projectName}/tables/{tableId}/upserts")
@@ -131,13 +188,22 @@ public class TunnelController {
             @RequestHeader(value = "Content-Encoding", required = false, defaultValue = "") String compression,
             @RequestBody byte[] requestBody
     ) throws IOException {
-        List<Object[]> records = Deserializer.deserializeData(new ByteArrayInputStream(requestBody),
-                tableService.getSchema(tableId).stream()
-                        .map(c -> TypeConvertUtils.convertToMaxComputeType(c.getType())).collect(Collectors.toList()));
-        SqlRunner.upsertData(tableId, records, tableService.getSchema(tableId));
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("x-odps-request-id", sessionId);
-        return new ResponseEntity<>("OK", headers, HttpStatus.OK);
+        if (!upsertSessionMap.containsKey(sessionId)) {
+            return new ResponseEntity("session has been committed", HttpStatus.NOT_FOUND);
+        }
+        try {
+            List<Object[]> records = Deserializer.deserializeData(new ByteArrayInputStream(requestBody),
+                    tableService.getSchema(tableId).stream()
+                            .map(c -> TypeConvertUtils.convertToMaxComputeType(c.getType()))
+                            .collect(Collectors.toList()));
+            SqlRunner.upsertData(tableId, records, tableService.getSchema(tableId));
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("x-odps-request-id", sessionId);
+            return new ResponseEntity<>("OK", headers, HttpStatus.OK);
+        } catch (Exception e) {
+            LOG.error("flush data error", e);
+            return new ResponseEntity(e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
     @GetMapping("/projects/{projectName}/tunnel")

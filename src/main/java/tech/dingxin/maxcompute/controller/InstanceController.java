@@ -2,7 +2,13 @@ package tech.dingxin.maxcompute.controller;
 
 import com.aliyun.odps.Job;
 import com.aliyun.odps.OdpsException;
+import com.aliyun.odps.rest.SimpleXmlUtils;
+import com.aliyun.odps.simpleframework.xml.Element;
+import com.aliyun.odps.simpleframework.xml.Root;
+import com.aliyun.odps.simpleframework.xml.convert.Convert;
 import com.aliyun.odps.task.SQLTask;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -38,6 +44,8 @@ import static com.aliyun.odps.rest.SimpleXmlUtils.marshal;
  */
 @RestController
 public class InstanceController {
+    private static final Logger LOG = LoggerFactory.getLogger(InstanceController.class);
+
     Map<String, Map<String, SQLResult>> instanceResultMap;
 
     public InstanceController() {
@@ -54,10 +62,13 @@ public class InstanceController {
         Instance instance = XmlUtils.parseInstance(body);
         SQL sql = instance.getJob().getTasks().getSql();
         String name = sql.getName();
-        String query = sql.getQuery();
+        String query = sql.getQuery().toUpperCase().trim();
+        String instanceId = CommonUtils.generateUUID();
+        LOG.info("create instance {} to execute query {}", instanceId, query);
 
         String result = SqlRunner.execute(query);
-        String instanceId = CommonUtils.generateUUID();
+        LOG.info("instance {} result {}", instanceId, result);
+
         instanceResultMap.putIfAbsent(instanceId, new HashMap<>());
         instanceResultMap.get(instanceId).put(name, new SQLResult(query, result));
 
@@ -122,7 +133,18 @@ public class InstanceController {
         results.entrySet()
                 .forEach(entry -> instanceResultModel.addTaskResult(entry.getKey(), entry.getValue().getResult()));
         String marshal = marshal(instanceResultModel);
-        System.out.println(marshal);
         return marshal;
+    }
+
+    @PostMapping("/projects/{projectName}/authorization")
+    public String generateLogView() throws Exception {
+        return marshal(new AuthorizationQueryResponse());
+    }
+
+    @Root(name = "Authorization", strict = false)
+    static class AuthorizationQueryResponse {
+        @Element(name = "Result", required = false)
+        @Convert(SimpleXmlUtils.EmptyStringConverter.class)
+        String result;
     }
 }
