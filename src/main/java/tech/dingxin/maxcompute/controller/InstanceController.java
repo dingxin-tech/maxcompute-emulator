@@ -81,6 +81,7 @@ public class InstanceController {
         SQL sql = instance.getJob().getTasks().getSql();
         String name = sql.getName();
         String query = sql.getQuery().toUpperCase().trim();
+        query = query.replaceAll("\\s+", " ");
         String instanceId = CommonUtils.generateUUID();
         LOG.info("create instance {} to execute query {}", instanceId, query);
 

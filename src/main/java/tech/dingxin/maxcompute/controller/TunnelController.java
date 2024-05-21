@@ -36,6 +36,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import tech.dingxin.maxcompute.entity.RowData;
 import tech.dingxin.maxcompute.entity.SqlLiteColumn;
 import tech.dingxin.maxcompute.entity.TableId;
 import tech.dingxin.maxcompute.service.TableService;
@@ -210,7 +211,7 @@ public class TunnelController {
             return new ResponseEntity("session has been committed", HttpStatus.NOT_FOUND);
         }
         try {
-            List<Object[]> records = Deserializer.deserializeData(new ByteArrayInputStream(requestBody),
+            List<RowData> records = Deserializer.deserializeData(new ByteArrayInputStream(requestBody),
                     tableService.getSchema(tableId).stream()
                             .map(c -> TypeConvertUtils.convertToMaxComputeType(c.getType()))
                             .collect(Collectors.toList()));

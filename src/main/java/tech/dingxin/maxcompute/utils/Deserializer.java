@@ -23,6 +23,7 @@ import com.aliyun.odps.type.ArrayTypeInfo;
 import com.aliyun.odps.type.TypeInfo;
 import com.aliyun.odps.type.TypeInfoFactory;
 import com.google.protobuf.CodedInputStream;
+import tech.dingxin.maxcompute.entity.RowData;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -37,18 +38,19 @@ import java.util.List;
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
  */
 public class Deserializer {
-    public static List<Object[]> deserializeData(InputStream data, List<TypeInfo> odpsType) throws IOException {
+    public static List<RowData> deserializeData(InputStream data, List<TypeInfo> odpsType) throws IOException {
         CodedInputStream input = CodedInputStream.newInstance(data);
-        List<Object[]> records = new ArrayList<>();
+        List<RowData> records = new ArrayList<>();
 
         Object[] record = new Object[odpsType.size()];
+        RowData.RowKind rowKind = RowData.RowKind.UPSERT;
         while (true) {
             int index = getNextFieldNumber(input);
             if (index == 33554430) {
                 break;
             }
             if (index == 33553408) {
-                records.add(record);
+                records.add(new RowData(record, rowKind));
                 // no check crc
                 input.readUInt32();
                 record = new Object[odpsType.size()];
@@ -57,7 +59,12 @@ public class Deserializer {
                 if (index == odpsType.size() + 1 || index == odpsType.size() + 2) {
                     readField(input, TypeInfoFactory.BIGINT);
                 } else if (index == odpsType.size() + 3) {
-                    readField(input, TypeInfoFactory.TINYINT);
+                    byte r = (byte) readField(input, TypeInfoFactory.TINYINT);
+                    if (r == 'D') {
+                        rowKind = RowData.RowKind.DELETE;
+                    } else if (r == 'U') {
+                        rowKind = RowData.RowKind.UPSERT;
+                    }
                 } else if (index == odpsType.size() + 4 || index == odpsType.size() + 5) {
                     readField(input, TypeInfoFactory.getArrayTypeInfo(TypeInfoFactory.BIGINT));
                 }
@@ -75,8 +82,14 @@ public class Deserializer {
             case BOOLEAN -> {
                 return input.readBool();
             }
-            case BIGINT, INT, TINYINT -> {
+            case BIGINT -> {
                 return input.readSInt64();
+            }
+            case INT -> {
+                return ((Number) input.readSInt64()).intValue();
+            }
+            case TINYINT -> {
+                return ((Number) input.readSInt64()).byteValue();
             }
             case DOUBLE -> {
                 return input.readDouble();

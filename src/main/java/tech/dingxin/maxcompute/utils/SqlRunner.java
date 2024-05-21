@@ -22,6 +22,7 @@ import com.csvreader.CsvWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tech.dingxin.maxcompute.aspect.AccessAspect;
+import tech.dingxin.maxcompute.entity.RowData;
 import tech.dingxin.maxcompute.entity.SqlLiteColumn;
 
 import java.io.IOException;
@@ -56,6 +57,8 @@ public class SqlRunner {
             return handleDropColumn(originSql);
         } else if (originSql.toUpperCase().contains("CHANGE COLUMN")) {
             return handleRenameColumn(originSql);
+        } else if (originSql.toUpperCase().contains("DROP TABLE")) {
+            return handleDropTable(originSql);
         }
         return executeSql(originSql);
     }
@@ -75,44 +78,75 @@ public class SqlRunner {
         }
     }
 
-    public static void upsertData(String tableName, List<Object[]> datas, List<SqlLiteColumn> schema)
-            throws SQLException {
+    public static void upsertData(String tableName, List<RowData> datas, List<SqlLiteColumn> schema) {
+        String[] primaryKeys = schema.stream().filter(SqlLiteColumn::isPrimaryKey).map(SqlLiteColumn::getName)
+                .toArray(String[]::new);
         // Building a basic INSERT statement
-        StringBuilder sql = new StringBuilder("INSERT INTO ");
-        sql.append(tableName.toUpperCase());
-        sql.append(" (");
-        sql.append(String.join(", ", schema.stream().map(SqlLiteColumn::getName).toArray(String[]::new)));
-        sql.append(") VALUES (");
-        sql.append(String.join(", ", "?".repeat(schema.size()).split("")));
-        sql.append(")");
+        StringBuilder upsertSql = new StringBuilder("INSERT INTO ");
+        upsertSql.append(tableName.toUpperCase());
+        upsertSql.append(" (");
+        upsertSql.append(String.join(", ", schema.stream().map(SqlLiteColumn::getName).toArray(String[]::new)));
+        upsertSql.append(") VALUES (");
+        upsertSql.append(String.join(", ", "?".repeat(schema.size()).split("")));
+        upsertSql.append(")");
 
         // Add ON CONFLICT ... DO UPDATE SET clause
-        sql.append(" ON CONFLICT (");
-        sql.append(String.join(", ", schema.stream().filter(SqlLiteColumn::isPrimaryKey).map(SqlLiteColumn::getName)
-                .toArray(String[]::new)));
-        sql.append(") DO UPDATE SET ");
+        upsertSql.append(" ON CONFLICT (");
+        upsertSql.append(String.join(", ", primaryKeys));
+        upsertSql.append(") DO UPDATE SET ");
 
         // Exclude keyColumnNames and update only non-key columns
         for (SqlLiteColumn columns : schema) {
             if (!columns.isPrimaryKey()) {
-                sql.append(columns.getName()).append(" = EXCLUDED.").append(columns.getName()).append(", ");
+                upsertSql.append(columns.getName()).append(" = EXCLUDED.").append(columns.getName()).append(", ");
             }
         }
         // Remove final comma and space
-        sql.setLength(sql.length() - 2);
+        upsertSql.setLength(upsertSql.length() - 2);
 
+        StringBuilder deleteSql = new StringBuilder("DELETE FROM " + tableName + " WHERE ");
+        for (int i = 0; i < primaryKeys.length; i++) {
+            deleteSql.append(primaryKeys[i]).append(" = ?");
+            if (i < primaryKeys.length - 1) {
+                deleteSql.append(" AND ");
+            }
+        }
+
+        List<Object[]> toUpsert = new ArrayList<>();
+        List<Object[]> toDelete = new ArrayList<>();
+        for (RowData row : datas) {
+            if (row.getRowKind() == RowData.RowKind.UPSERT) {
+                executeBatch(toDelete, deleteSql);
+                toUpsert.add(row.getData());
+            } else if (row.getRowKind() == RowData.RowKind.DELETE) {
+                executeBatch(toUpsert, upsertSql);
+                toDelete.add(row.getPkData(schema));
+            }
+        }
+        executeBatch(toDelete, deleteSql);
+        executeBatch(toUpsert, upsertSql);
+    }
+
+    private static void executeBatch(List<Object[]> batch, StringBuilder upsertSql) {
+        if (batch.isEmpty()) {
+            return;
+        }
         // Obtain the database connection and execute the INSERT statement
         try (Connection conn = CommonUtils.getConnection();
-                PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
+                PreparedStatement pstmt = conn.prepareStatement(upsertSql.toString())) {
 
-            for (Object[] rowData : datas) {
+            for (Object[] rowData : batch) {
                 for (int i = 0; i < rowData.length; i++) {
                     pstmt.setObject(i + 1, rowData[i]);
                 }
-                LOG.info("execute sql: {}", pstmt);
                 pstmt.addBatch();
             }
-            pstmt.executeUpdate();
+            System.out.println(pstmt);
+            pstmt.executeBatch();
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        } finally {
+            batch.clear();
         }
     }
 
@@ -133,6 +167,12 @@ public class SqlRunner {
             e.printStackTrace();
         }
         return columns;
+    }
+
+    private static String handleDropTable(String originSql) throws SQLException {
+        String noDatabasePrefix = originSql.replaceAll("DROP TABLE \\S+\\.", "DROP TABLE ");
+        noDatabasePrefix = noDatabasePrefix.replaceAll("DROP TABLE IF EXISTS \\S+\\.", "DROP TABLE IF EXISTS ");
+        return executeSql(noDatabasePrefix);
     }
 
     public static String handleAddColumn(String mcSql) throws SQLException {

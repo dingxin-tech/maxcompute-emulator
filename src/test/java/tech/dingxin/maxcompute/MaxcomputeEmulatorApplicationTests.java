@@ -18,6 +18,7 @@
 
 package tech.dingxin.maxcompute;
 
+import com.aliyun.odps.Column;
 import com.aliyun.odps.Instance;
 import com.aliyun.odps.Odps;
 import com.aliyun.odps.OdpsException;
@@ -30,6 +31,7 @@ import com.aliyun.odps.task.SQLTask;
 import com.aliyun.odps.tunnel.TableTunnel;
 import com.aliyun.odps.tunnel.io.CompressOption;
 import com.aliyun.odps.tunnel.streams.UpsertStream;
+import com.aliyun.odps.type.TypeInfoFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -70,16 +72,22 @@ class MaxcomputeEmulatorApplicationTests {
     @Test
     void testUpsertSession() throws Exception {
         Odps odps = getTestOdps();
+        odps.tables().delete("students", true);
+        odps.tables().newTableCreator("project", "students",
+                TableSchema.builder().withColumn(Column.newBuilder("id", TypeInfoFactory.BIGINT).primaryKey().build())
+                        .withStringColumn("name").build()).transactionTable().create();
+
         TableTunnel.UpsertSession session = odps.tableTunnel().buildUpsertSession("project", "students").build();
 
         UpsertStream stream = session.buildUpsertStream().setCompressOption(new CompressOption(
                 CompressOption.CompressAlgorithm.ODPS_RAW, 1, 0)).build();
         Record record = session.newRecord();
-        record.set(0, 2);
+        record.set(0, 2L);
         record.set(1, "Jack");
         stream.upsert(record);
         stream.upsert(record);
         stream.upsert(record);
+        stream.delete(record);
         stream.upsert(record);
         stream.flush();
 
@@ -171,8 +179,6 @@ class MaxcomputeEmulatorApplicationTests {
         TableSchema schema = table.getSchema();
         boolean partitioned = table.isPartitioned();
         List<String> primaryKey = table.getPrimaryKey();
-
-
 
     }
 
