@@ -16,17 +16,13 @@ cd MaxComputeEmulator
 # If there are any installation steps like dependencies installation, add them here
 ```
 
-## Usage
-
-TODO
-
 ## Current State
 
 The project is currently in the **pre-alpha phase**, with main interfaces implemented, including but not limited to:
 
 1. **SQL-related Interfaces**
 2. **Table Metadata-related Interfaces**
-3. **Table-API Data Reading Interfaces**
+3. **Tunnel upsert Interfaces**
 
 ## Contributing
 
@@ -42,4 +38,4 @@ If you encounter any issues or require assistance, please open an issue on the p
 
 ## License
 
-This project is licensed under the [LICENSE NAME] License - see the LICENSE.md file for details.
+This project is licensed under the [Apache 2.0] License - see the LICENSE file for details.

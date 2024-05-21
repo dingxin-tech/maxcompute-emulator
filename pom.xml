@@ -26,9 +26,9 @@
         <version>3.2.5</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
-    <groupId>tech.dingxin</groupId>
+    <groupId>com.aliyun.odps</groupId>
     <artifactId>maxcompute-emulator</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.0.1</version>
     <name>maxcompute-emulator</name>
     <description>mock version to access MaxCompute</description>
     <properties>
