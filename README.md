@@ -6,14 +6,19 @@ MaxCompute Emulator is a lightweight utility designed to simulate the behavior o
 
 ## Installation
 
+The project is a typical SpringBoot application, which can be run directly with the following command:
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/MaxComputeEmulator.git
+git clone https://github.com/dingxin-tech/maxcompute-emulator.git
 
 # Navigate to the emulator directory
-cd MaxComputeEmulator
+cd maxcompute-emulator
 
-# If there are any installation steps like dependencies installation, add them here
+# Build the project
+./mvnw install
+
+# Run the project
+./mvnw spring-boot:run
 ```
 
 ## Current State

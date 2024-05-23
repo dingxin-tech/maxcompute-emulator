@@ -101,12 +101,12 @@
             <version>2.10.1</version>
         </dependency>
 
-        <!--arrow-->
-        <dependency>
-            <groupId>tech.dingxin</groupId>
-            <artifactId>arrow-utils</artifactId>
-            <version>0.0.1</version>
-        </dependency>
+<!--        &lt;!&ndash;arrow&ndash;&gt;-->
+<!--        <dependency>-->
+<!--            <groupId>tech.dingxin</groupId>-->
+<!--            <artifactId>arrow-utils</artifactId>-->
+<!--            <version>0.0.1</version>-->
+<!--        </dependency>-->
 
         <!--test-->
         <dependency>
@@ -115,7 +115,6 @@
             <version>${odps.version}</version>
             <scope>test</scope>
         </dependency>
-
     </dependencies>
 
     <build>

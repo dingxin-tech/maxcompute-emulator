@@ -24,12 +24,8 @@ import com.aliyun.odps.entity.SqlLiteColumn;
 import com.aliyun.odps.utils.CommonUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import tech.dingxin.ArrowRowData;
 
 import java.io.OutputStream;
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.Statement;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,14 +72,14 @@ public class StorageService {
         //        }
     }
 
-    private List<ArrowRowData> read(String tableName) throws Exception {
-        try (
-                Connection conn = CommonUtils.getConnection();
-                Statement stmt = conn.createStatement();
-                ResultSet rs = stmt.executeQuery(
-                        "select * from " + tableName.toUpperCase() + ";")
-        ) {
-            return CommonUtils.convertToRowData(rs);
-        }
-    }
+//    private List<ArrowRowData> read(String tableName) throws Exception {
+//        try (
+//                Connection conn = CommonUtils.getConnection();
+//                Statement stmt = conn.createStatement();
+//                ResultSet rs = stmt.executeQuery(
+//                        "select * from " + tableName.toUpperCase() + ";")
+//        ) {
+//            return CommonUtils.convertToRowData(rs);
+//        }
+//    }
 }
