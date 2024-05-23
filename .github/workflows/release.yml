@@ -31,15 +31,15 @@ jobs:
         with:
           java-version: 17
 
+      - name: Build with Maven
+        run: ./mvnw install -DskipTests
+
       - name: Cache Maven packages
         uses: actions/cache@v2
         with:
           path: ~/.m2
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
-    
-      - name: Build with Maven
-        run: ./mvnw install -DskipTests
 
       - name: Log in to Docker Hub
         uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a
