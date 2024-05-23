@@ -16,30 +16,30 @@
  * limitations under the License.
  */
 
-package com.aliyun.odps.entity;
+package com.aliyun.odps;
 
-import com.aliyun.odps.utils.TypeConvertUtils;
-import com.google.gson.JsonObject;
-import lombok.AllArgsConstructor;
-import lombok.Data;
+import com.aliyun.odps.data.Record;
+import com.aliyun.odps.task.SQLTask;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+
+import java.util.List;
 
 /**
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
  */
-@Data
-@AllArgsConstructor
-public class SqlLiteColumn {
-    String name;
-    String type;
-    boolean notNull;
-    String defaultValue;
-    boolean primaryKey;
-
-    public JsonObject toJson() {
-        JsonObject jsonObject = new JsonObject();
-        jsonObject.addProperty("Name", name);
-        jsonObject.addProperty("Type", TypeConvertUtils.convertToMaxComputeType(type).getTypeName());
-        jsonObject.addProperty("Nullable", notNull);
-        return jsonObject;
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
+class SqlTest {
+    @Test
+    void testReadTable() throws OdpsException {
+        Odps odps = MaxcomputeEmulatorApplicationTests.getTestOdps();
+        Instance instance = SQLTask.run(odps, "select * from table1;");
+        instance.waitForSuccess();
+        List<Record> result = SQLTask.getResult(instance);
+        for (Record record : result) {
+            System.out.println(record);
+        }
     }
+
+
 }

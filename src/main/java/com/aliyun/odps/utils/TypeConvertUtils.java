@@ -20,8 +20,6 @@ package com.aliyun.odps.utils;
 
 import com.aliyun.odps.type.TypeInfo;
 import com.aliyun.odps.type.TypeInfoFactory;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 
 /**
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)

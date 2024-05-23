@@ -18,12 +18,11 @@
 
 package com.aliyun.odps.utils;
 
-import com.aliyun.odps.aspect.AccessAspect;
+import com.aliyun.odps.entity.RowData;
 import com.aliyun.odps.entity.SqlLiteColumn;
 import com.csvreader.CsvWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.aliyun.odps.entity.RowData;
 
 import java.io.IOException;
 import java.io.StringWriter;
@@ -44,7 +43,7 @@ import java.util.stream.IntStream;
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
  */
 public class SqlRunner {
-    private static final Logger LOG = LoggerFactory.getLogger(AccessAspect.class);
+    private static final Logger LOG = LoggerFactory.getLogger(SqlRunner.class);
 
     public static String execute(String originSql) throws SQLException {
         if (originSql.toUpperCase().contains("CREATE TABLE")) {

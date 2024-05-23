@@ -18,16 +18,16 @@
 
 package com.aliyun.odps.service;
 
+import com.aliyun.odps.entity.SqlLiteColumn;
 import com.aliyun.odps.type.TypeInfo;
+import com.aliyun.odps.utils.CommonUtils;
+import com.aliyun.odps.utils.SqlRunner;
 import com.aliyun.odps.utils.TypeConvertUtils;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.stereotype.Service;
-import com.aliyun.odps.entity.SqlLiteColumn;
-import com.aliyun.odps.utils.CommonUtils;
-import com.aliyun.odps.utils.SqlRunner;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -109,6 +109,17 @@ public class TableService {
             e.printStackTrace();
         }
         return tables;
+    }
+
+    public long getRowCount(String tableName) throws SQLException {
+        try (
+                Connection conn = CommonUtils.getConnection();
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(
+                        "select count(*) from " + tableName.toUpperCase() + ";")
+        ) {
+            return rs.getLong(1);
+        }
     }
 
     private JsonObject toJson(String columnName, TypeInfo typeInfo, boolean notNull, String defaultValue) {

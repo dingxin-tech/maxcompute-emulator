@@ -35,7 +35,7 @@ import java.util.List;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
 class MaxcomputeEmulatorApplicationTests {
 
-    private Odps getTestOdps() {
+    public static Odps getTestOdps() {
         Account account = new AliyunAccount("ak", "sk");
         Odps odps = new Odps(account);
         odps.setDefaultProject("project");

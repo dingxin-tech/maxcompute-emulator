@@ -19,17 +19,19 @@
 package com.aliyun.odps.utils;
 
 import com.aliyun.odps.OdpsType;
+import com.aliyun.odps.entity.RowData;
 import com.aliyun.odps.type.ArrayTypeInfo;
 import com.aliyun.odps.type.TypeInfo;
 import com.aliyun.odps.type.TypeInfoFactory;
 import com.google.protobuf.CodedInputStream;
-import com.aliyun.odps.entity.RowData;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
@@ -88,22 +90,42 @@ public class Deserializer {
             case INT -> {
                 return ((Number) input.readSInt64()).intValue();
             }
+            case SMALLINT -> {
+                return ((Number) input.readSInt64()).shortValue();
+            }
             case TINYINT -> {
                 return ((Number) input.readSInt64()).byteValue();
             }
             case DOUBLE -> {
                 return input.readDouble();
             }
+            case FLOAT -> {
+                return input.readFloat();
+            }
             case DATETIME -> {
                 return Instant.ofEpochMilli(input.readSInt64()).atZone(ZoneId.of("UTC"));
             }
-            case STRING, DECIMAL -> {
+            case DATE -> {
+                return LocalDate.ofEpochDay(input.readSInt64());
+            }
+            case TIMESTAMP -> {
+                return Instant.ofEpochSecond(input.readSInt64(), input.readSInt32());
+            }
+            case TIMESTAMP_NTZ -> {
+                return LocalDateTime.ofInstant(Instant.ofEpochSecond(input.readSInt64(), input.readSInt32()),
+                        ZoneId.of("UTC"));
+            }
+            case CHAR, VARCHAR, STRING, DECIMAL -> {
                 int length = input.readRawVarint32();
                 String str = new String(input.readRawBytes(length), StandardCharsets.UTF_8);
                 if (typeInfo.getOdpsType() == OdpsType.DECIMAL) {
                     return new BigDecimal(str);
                 }
                 return str;
+            }
+            case BINARY -> {
+                int length = input.readRawVarint32();
+                return input.readRawBytes(length);
             }
             case ARRAY -> {
                 int size = input.readInt32();

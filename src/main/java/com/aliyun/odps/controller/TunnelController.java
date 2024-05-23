@@ -18,6 +18,7 @@
 
 package com.aliyun.odps.controller;
 
+import com.aliyun.odps.entity.RowData;
 import com.aliyun.odps.entity.SqlLiteColumn;
 import com.aliyun.odps.entity.TableId;
 import com.aliyun.odps.service.TableService;
@@ -43,7 +44,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
-import com.aliyun.odps.entity.RowData;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;

@@ -20,10 +20,10 @@ package com.aliyun.odps.utils;
 
 import com.aliyun.odps.entity.internal.instance.Instance;
 
+import java.io.StringReader;
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;
 import javax.xml.bind.Unmarshaller;
-import java.io.StringReader;
 
 /**
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
