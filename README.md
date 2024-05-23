@@ -2,7 +2,11 @@
 
 ## Introduction
 
-MaxCompute Emulator is a lightweight utility designed to simulate the behavior of Alibaba Cloud's MaxCompute (previously known as ODPS) service. It leverages SQLite to offer a mock environment for clients who don’t have access to an actual MaxCompute account to test their functionalities. This project is particularly useful for development and testing purposes where MaxCompute resource accessibility or cost constraints are a concern.
+MaxCompute Emulator is a lightweight utility designed to simulate the behavior of Alibaba Cloud's MaxCompute (previously known as ODPS) service. 
+
+It leverages SQLite to offer a mock environment for clients who don’t have access to an actual MaxCompute account to test their functionalities. 
+
+This project is particularly useful for development and testing purposes where MaxCompute resource accessibility or cost constraints are a concern.
 
 ## Installation
 
@@ -19,6 +23,63 @@ cd maxcompute-emulator
 
 # Run the project
 ./mvnw spring-boot:run
+```
+
+Or you can use the docker image:
+```bash
+docker run -p 8080:8080 maxcompute/maxcompute-emulator:latest
+```
+## Usage
+When you want to implement e2e testing, it is recommended to use it in conjunction with the [TestContainers](https://java.testcontainers.org/) component. 
+
+Usage examples are as follows
+
+```java
+// ignore imports
+
+public class MaxComputeEmulatorTest {
+
+    public static final DockerImageName MAXCOMPUTE_IMAGE =
+            DockerImageName.parse("maxcompute/maxcompute-emulator:v0.0.1");
+
+    @ClassRule
+    public static GenericContainer<?> maxcompute =
+            new GenericContainer<>(MAXCOMPUTE_IMAGE)
+                    .withExposedPorts(8080)
+                    .waitingFor(
+                            Wait.forLogMessage(".*Started MaxcomputeEmulatorApplication.*\\n", 1));
+
+    public Odps getTestOdps() {
+        Account account = new AliyunAccount("ak", "sk");
+        Odps odps = new Odps(account);
+        odps.setEndpoint(getEndpoint());
+        odps.setTunnelEndpoint(getEndpoint());
+        return odps;
+    }
+
+    @Test
+    public void test() {
+        Odps odps = getTestOdps();
+        // create table and get schema for example
+        Instance instance = SQLTask.run(odps, "create table test(c1 bigint)");
+        instance.waitForSuccess();
+        System.out.println(odps.tables().get("test").getSchema());
+    }
+
+    private String getEndpoint() {
+        String ip;
+        if (maxcompute.getHost().equals("localhost")) {
+            try {
+                ip = InetAddress.getLocalHost().getHostAddress();
+            } catch (UnknownHostException e) {
+                ip = "127.0.0.1";
+            }
+        } else {
+            ip = maxcompute.getHost();
+        }
+        return "http://" + ip + ":" + maxcompute.getFirstMappedPort();
+    }
+}
 ```
 
 ## Current State
