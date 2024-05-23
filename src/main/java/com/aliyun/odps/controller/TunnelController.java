@@ -18,6 +18,7 @@
 
 package com.aliyun.odps.controller;
 
+import com.aliyun.odps.common.Options;
 import com.aliyun.odps.entity.RowData;
 import com.aliyun.odps.entity.SqlLiteColumn;
 import com.aliyun.odps.entity.TableId;
@@ -128,7 +129,7 @@ public class TunnelController {
         JsonArray buckets = new JsonArray();
         buckets.add(0);
         slot.add("buckets", buckets);
-        slot.add("worker_addr", new JsonPrimitive("127.0.0.1:8080"));
+        slot.add("worker_addr", new JsonPrimitive(Options.ENDPOINT));
         slots.add(slot);
 
         result.add("slots", slots);
@@ -188,7 +189,7 @@ public class TunnelController {
         JsonArray buckets = new JsonArray();
         buckets.add(0);
         slot.add("buckets", buckets);
-        slot.add("worker_addr", new JsonPrimitive("127.0.0.1:8080"));
+        slot.add("worker_addr", new JsonPrimitive(Options.ENDPOINT));
         slots.add(slot);
 
         result.add("slots", slots);
@@ -228,6 +229,6 @@ public class TunnelController {
     @GetMapping("/projects/{projectName}/tunnel")
     @ResponseBody
     public String getTunnelEndpoint() {
-        return "127.0.0.1:8080";
+        return Options.ENDPOINT;
     }
 }

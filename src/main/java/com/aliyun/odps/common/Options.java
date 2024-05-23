@@ -22,7 +22,7 @@ package com.aliyun.odps.common;
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
  */
 public class Options {
-    public static final String PORT = "8080";
-    public static final String DATA_DIR = "/tmp";
+    public static String ENDPOINT = "127.0.0.1:8080";
+    public static String DATA_DIR = "/tmp";
 
 }

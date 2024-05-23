@@ -76,24 +76,29 @@ public class InstanceController {
             @PathVariable("projectName") String projectName,
             @RequestParam("curr_project") String currProject,
             @RequestBody String body) throws SQLException {
+        try {
 
-        Instance instance = XmlUtils.parseInstance(body);
-        SQL sql = instance.getJob().getTasks().getSql();
-        String name = sql.getName();
-        String query = sql.getQuery().toUpperCase().trim();
-        query = query.replaceAll("\\s+", " ");
-        String instanceId = CommonUtils.generateUUID();
-        LOG.info("create instance {} to execute query {}", instanceId, query);
+            Instance instance = XmlUtils.parseInstance(body);
+            SQL sql = instance.getJob().getTasks().getSql();
+            String name = sql.getName();
+            String query = sql.getQuery().toUpperCase().trim();
+            query = query.replaceAll("\\s+", " ");
+            String instanceId = CommonUtils.generateUUID();
+            LOG.info("create instance {} to execute query {}", instanceId, query);
 
-        String result = SqlRunner.execute(query);
-        LOG.info("instance {} result {}", instanceId, result);
+            String result = SqlRunner.execute(query);
+            LOG.info("instance {} result {}", instanceId, result);
 
-        instanceResultMap.putIfAbsent(instanceId, new HashMap<>());
-        instanceResultMap.get(instanceId).put(name, new SQLResult(query, result));
+            instanceResultMap.putIfAbsent(instanceId, new HashMap<>());
+            instanceResultMap.get(instanceId).put(name, new SQLResult(query, result));
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setLocation(URI.create("/" + instanceId));
-        return new ResponseEntity<>(new MessageResponse("Created"), headers, HttpStatus.CREATED);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setLocation(URI.create("/" + instanceId));
+            return new ResponseEntity<>(new MessageResponse("Created"), headers, HttpStatus.CREATED);
+        } catch (Exception e) {
+            LOG.error("create instance error", e);
+            return new ResponseEntity<>(new MessageResponse(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
     @GetMapping("/projects/{projectName}/instances/{instanceId}")
