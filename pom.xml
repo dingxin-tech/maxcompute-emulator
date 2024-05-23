@@ -28,7 +28,7 @@
     </parent>
     <groupId>com.aliyun.odps</groupId>
     <artifactId>maxcompute-emulator</artifactId>
-    <version>0.0.1</version>
+    <version>0.0.2</version>
     <name>maxcompute-emulator</name>
     <description>mock version to access MaxCompute</description>
     <properties>
