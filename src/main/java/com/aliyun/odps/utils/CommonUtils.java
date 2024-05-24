@@ -19,6 +19,9 @@
 package com.aliyun.odps.utils;
 
 import org.apache.arrow.vector.types.pojo.Schema;
+import tech.dingxin.ArrowRowData;
+import tech.dingxin.jdbc.JdbcUtils;
+import tech.dingxin.jdbc.dialects.SqlLiteDialect;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -42,18 +45,19 @@ public class CommonUtils {
         return DriverManager.getConnection(URL);
     }
 
-//    public static List<ArrowRowData> convertToRowData(ResultSet resultSet) throws Exception {
-//        List<ArrowRowData> rowData = new ArrayList<>();
-//        ResultSetMetaData metaData = resultSet.getMetaData();
-//        Schema schema = JdbcUtils.toArrowSchema(metaData, SqlLiteDialect.INSTANCE);
-//
-//        while (resultSet.next()) {
-//            ArrowRowData row = new ArrowRowData(schema);
-//            for (int i = 1; i <= metaData.getColumnCount(); i++) {
-//                row.set(i - 1, resultSet.getObject(i));
-//            }
-//            rowData.add(row);
-//        }
-//        return rowData;
-//    }
+    public static List<ArrowRowData> convertToRowData(ResultSet resultSet) throws Exception {
+        List<ArrowRowData> rowData = new ArrayList<>();
+        ResultSetMetaData metaData = resultSet.getMetaData();
+        Schema schema = JdbcUtils.toArrowSchema(metaData, SqlLiteDialect.INSTANCE);
+
+        while (resultSet.next()) {
+            ArrowRowData row = new ArrowRowData(schema);
+            for (int i = 1; i <= metaData.getColumnCount(); i++) {
+                System.out.println(resultSet.getObject(i));
+                row.set(i - 1, resultSet.getObject(i));
+            }
+            rowData.add(row);
+        }
+        return rowData;
+    }
 }

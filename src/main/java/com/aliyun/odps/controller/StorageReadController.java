@@ -21,7 +21,6 @@ package com.aliyun.odps.controller;
 import com.aliyun.odps.entity.PlanSplitRequest;
 import com.aliyun.odps.entity.PlanSplitResponse;
 import com.aliyun.odps.service.StorageService;
-import org.apache.arrow.vector.VectorSchemaRoot;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -64,16 +63,14 @@ public class StorageReadController {
         StreamingResponseBody responseBody = outputStream -> {
             // Setup Arrow objects. Example here assumes a custom method to create these.
             // This should be your actual logic to generate VectorSchemaRoot.
-            storageService.readTable(table, sessionId, maxBatchRows, splitIndex, outputStream);
+            try {
+                storageService.readTable(table, sessionId, maxBatchRows, splitIndex, outputStream);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         };
         return ResponseEntity.ok()
                 .header("Content-Type", "application/octet-stream")
                 .body(responseBody);
-    }
-
-    private VectorSchemaRoot createVectorSchemaRoot() {
-        // Your logic to create and fill in the VectorSchemaRoot goes here.
-        // This might involve creating Fields, Vectors, and populating them with data.
-        return null;
     }
 }

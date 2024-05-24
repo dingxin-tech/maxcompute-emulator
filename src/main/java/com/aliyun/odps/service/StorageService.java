@@ -22,10 +22,19 @@ import com.aliyun.odps.entity.PlanSplitRequest;
 import com.aliyun.odps.entity.PlanSplitResponse;
 import com.aliyun.odps.entity.SqlLiteColumn;
 import com.aliyun.odps.utils.CommonUtils;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.ipc.ArrowStreamWriter;
+import org.apache.arrow.vector.types.pojo.Schema;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import tech.dingxin.ArrowDataSerializer;
+import tech.dingxin.ArrowRowData;
 
 import java.io.OutputStream;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +47,8 @@ public class StorageService {
     private Map<String, String> sessionIdTableMap;
     @Autowired
     private TableService tableService;
+
+    BufferAllocator allocator = new RootAllocator(Long.MAX_VALUE);
 
     public StorageService() {
         this.sessionIdTableMap = new HashMap<>();
@@ -56,30 +67,40 @@ public class StorageService {
         }
     }
 
-    public void readTable(String table, String sessionId, int maxBatchRows, int splitIndex, OutputStream outputStream) {
-        // TODO
-        //        try (ArrowStreamWriter arrowWriter = new ArrowStreamWriter(vectorSchemaRoot, null, outputStream)) {
-        //            arrowWriter.start();
-        //            // Your logic to write data to VectorSchemaRoot goes here.
-        //
-        //            // For example, write a batch of data, you might loop this based on your actual data source.
-        //            arrowWriter.writeBatch();
-        //
-        //            // Finalize and close the writer.
-        //            arrowWriter.end();
-        //        } finally {
-        //            vectorSchemaRoot.close();
-        //        }
+    public void readTable(String table, String sessionId, int maxBatchRows, int splitIndex, OutputStream outputStream)
+            throws Exception {
+        List<ArrowRowData> data = read(table);
+        if (data.isEmpty()) {
+            return;
+        }
+        Schema schema = data.get(0).getSchema();
+        try (ArrowDataSerializer serializer = new ArrowDataSerializer(schema, allocator);
+                ArrowStreamWriter arrowWriter = new ArrowStreamWriter(serializer.getVectorSchemaRoot(), null,
+                        outputStream)) {
+            arrowWriter.start();
+            for (int i = 0; i < data.size(); i++) {
+                serializer.add(data.get(i));
+                if ((i + 1) % 4096 == 0) {
+                    serializer.getVectorSchemaRoot();
+                    arrowWriter.writeBatch();
+                    serializer.reset();
+                }
+            }
+            serializer.getVectorSchemaRoot();
+            arrowWriter.writeBatch();
+            // Finalize and close the writer.
+            arrowWriter.end();
+        }
     }
 
-//    private List<ArrowRowData> read(String tableName) throws Exception {
-//        try (
-//                Connection conn = CommonUtils.getConnection();
-//                Statement stmt = conn.createStatement();
-//                ResultSet rs = stmt.executeQuery(
-//                        "select * from " + tableName.toUpperCase() + ";")
-//        ) {
-//            return CommonUtils.convertToRowData(rs);
-//        }
-//    }
+    private List<ArrowRowData> read(String tableName) throws Exception {
+        try (
+                Connection conn = CommonUtils.getConnection();
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(
+                        "select * from " + tableName.toUpperCase() + ";")
+        ) {
+            return CommonUtils.convertToRowData(rs);
+        }
+    }
 }

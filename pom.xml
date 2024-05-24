@@ -85,6 +85,16 @@
             <groupId>com.aliyun.odps</groupId>
             <artifactId>odps-sdk-core</artifactId>
             <version>${odps.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.arrow</groupId>
+                    <artifactId>arrow-vector</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.arrow</groupId>
+                    <artifactId>arrow-memory-netty</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!--csv-->
@@ -101,12 +111,23 @@
             <version>2.10.1</version>
         </dependency>
 
-<!--        &lt;!&ndash;arrow&ndash;&gt;-->
-<!--        <dependency>-->
-<!--            <groupId>tech.dingxin</groupId>-->
-<!--            <artifactId>arrow-utils</artifactId>-->
-<!--            <version>0.0.1</version>-->
-<!--        </dependency>-->
+        <!--arrow-->
+        <dependency>
+            <groupId>tech.dingxin</groupId>
+            <artifactId>arrow-utils</artifactId>
+            <version>0.0.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-vector</artifactId>
+            <version>15.0.2</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-unsafe</artifactId>
+            <version>15.0.2</version>
+            <scope>runtime</scope>
+        </dependency>
 
         <!--test-->
         <dependency>
