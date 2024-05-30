@@ -59,7 +59,7 @@ public class StorageService {
             String sessionId = CommonUtils.generateUUID();
             sessionIdTableMap.put(sessionId, request.getTable());
             long rowCount = tableService.getRowCount(request.getTable());
-            List<SqlLiteColumn> schema = tableService.getSchema(request.getTable());
+            List<SqlLiteColumn> schema = tableService.getDataSchema(request.getTable());
             return new PlanSplitResponse(sessionId, null, null, schema, rowCount, 1);
         } catch (Exception e) {
             e.printStackTrace();

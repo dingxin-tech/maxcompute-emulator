@@ -20,6 +20,8 @@ package com.aliyun.odps;
 
 import com.aliyun.odps.data.Record;
 import com.aliyun.odps.task.SQLTask;
+import com.aliyun.odps.type.TypeInfoFactory;
+import com.google.common.collect.ImmutableMap;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -41,5 +43,16 @@ class SqlTest {
         }
     }
 
+    @Test
+    void testCreatePartitionedTable() throws OdpsException {
+        Odps odps = MaxcomputeEmulatorApplicationTests.getTestOdps();
+        odps.tables().newTableCreator(odps.getDefaultProject(), "parTest",
+                        TableSchema.builder().withColumn(Column.newBuilder("id",
+                                TypeInfoFactory.BIGINT).primaryKey().withComment("BIGINT").build()).withBigintColumn("id2").withPartitionColumn(
+                                Column.newBuilder("ds", TypeInfoFactory.STRING).withComment("STRING").build()).build()).transactionTable().withHints(
+                        ImmutableMap.of("hi1", "hi2")).withSchemaName("schema")
+                .ifNotExists().withBucketNum(10).create();
+        System.out.println(odps.tables().get(odps.getDefaultProject(), "parTest").getSchema());
+    }
 
 }

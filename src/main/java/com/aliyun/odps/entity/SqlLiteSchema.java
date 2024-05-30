@@ -18,29 +18,39 @@
 
 package com.aliyun.odps.entity;
 
-import com.aliyun.odps.utils.TypeConvertUtils;
-import com.google.gson.JsonObject;
+import com.google.gson.Gson;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
  */
 @Data
 @AllArgsConstructor
-public class SqlLiteColumn {
-    String name;
-    String type;
-    boolean notNull;
-    String defaultValue;
-    boolean primaryKey;
-    boolean partitionKey;
+@NoArgsConstructor
+public class SqlLiteSchema {
+    List<SqlLiteColumn> columns;
+    List<SqlLiteColumn> partitionColumns;
 
-    public JsonObject toOdpsJson() {
-        JsonObject jsonObject = new JsonObject();
-        jsonObject.addProperty("Name", name);
-        jsonObject.addProperty("Type", TypeConvertUtils.convertToMaxComputeType(type).getTypeName());
-        jsonObject.addProperty("Nullable", notNull);
-        return jsonObject;
+    public List<SqlLiteColumn> getColumns() {
+        return new ArrayList<>(columns);
+    }
+
+    public List<SqlLiteColumn> getPartitionColumns() {
+        return new ArrayList<>(partitionColumns);
+    }
+
+    public String toJson() {
+        Gson gson = new Gson();
+        return gson.toJson(this);
+    }
+
+    public static SqlLiteSchema fromJson(String json) {
+        Gson gson = new Gson();
+        return gson.fromJson(json, SqlLiteSchema.class);
     }
 }

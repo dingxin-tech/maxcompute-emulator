@@ -22,10 +22,11 @@ import com.aliyun.odps.common.Options;
 import com.aliyun.odps.entity.RowData;
 import com.aliyun.odps.entity.SqlLiteColumn;
 import com.aliyun.odps.entity.TableId;
+import com.aliyun.odps.function.Table;
+import com.aliyun.odps.function.UpsertTable;
 import com.aliyun.odps.service.TableService;
 import com.aliyun.odps.utils.CommonUtils;
 import com.aliyun.odps.utils.Deserializer;
-import com.aliyun.odps.utils.SqlRunner;
 import com.aliyun.odps.utils.TypeConvertUtils;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -98,7 +99,7 @@ public class TunnelController {
         JsonArray columns = new JsonArray();
         JsonArray hashKeys = new JsonArray();
 
-        List<SqlLiteColumn> sqlLiteSchema = tableService.getSchema(tableId);
+        List<SqlLiteColumn> sqlLiteSchema = tableService.getDataSchema(tableId.toUpperCase());
         for (int cid = 0; cid < sqlLiteSchema.size(); cid++) {
             SqlLiteColumn column = sqlLiteSchema.get(cid);
             JsonObject columnJson = new JsonObject();
@@ -158,9 +159,12 @@ public class TunnelController {
         JsonArray columns = new JsonArray();
         JsonArray hashKeys = new JsonArray();
 
-        List<SqlLiteColumn> sqlLiteSchema = tableService.getSchema(tableId.getTableName());
+        List<SqlLiteColumn> sqlLiteSchema = tableService.getDataSchema(tableId.getTableName());
         for (int cid = 0; cid < sqlLiteSchema.size(); cid++) {
             SqlLiteColumn column = sqlLiteSchema.get(cid);
+            if (column.isPartitionKey()) {
+                continue;
+            }
             JsonObject columnJson = new JsonObject();
             columnJson.add("name", new JsonPrimitive(column.getName()));
             columnJson.add("type",
@@ -213,10 +217,10 @@ public class TunnelController {
         }
         try {
             List<RowData> records = Deserializer.deserializeData(new ByteArrayInputStream(requestBody),
-                    tableService.getSchema(tableId).stream()
+                    tableService.getDataSchema(tableId.toUpperCase()).stream()
                             .map(c -> TypeConvertUtils.convertToMaxComputeType(c.getType()))
                             .collect(Collectors.toList()));
-            SqlRunner.upsertData(tableId, records, tableService.getSchema(tableId));
+            UpsertTable.upsertData(tableId, records, Table.of(tableId.toUpperCase()).getSchema(), partition);
             HttpHeaders headers = new HttpHeaders();
             headers.set("x-odps-request-id", sessionId);
             return new ResponseEntity<>("OK", headers, HttpStatus.OK);

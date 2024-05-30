@@ -75,6 +75,12 @@ public class TypeConvertUtils {
         throw new UnsupportedOperationException("Unsupported type: " + typeName);
     }
 
+    public static String convertToSqlLiteType(String typeName) {
+        if (typeName.equalsIgnoreCase("STRING")) {
+            return "TEXT";
+        }
+        return typeName;
+    }
 
 }
 

@@ -42,10 +42,11 @@ public class RowData {
     public Object[] getPkData(List<SqlLiteColumn> schema) {
         List<Object> pkData = new ArrayList<>();
         for (int i = 0; i < schema.size(); i++) {
-            if (schema.get(i).isPrimaryKey()) {
+            if (schema.get(i).isPrimaryKey() || schema.get(i).isPartitionKey()) {
                 pkData.add(data[i]);
             }
         }
         return pkData.toArray();
     }
+
 }

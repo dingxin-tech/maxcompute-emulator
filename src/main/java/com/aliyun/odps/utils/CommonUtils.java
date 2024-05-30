@@ -53,7 +53,6 @@ public class CommonUtils {
         while (resultSet.next()) {
             ArrowRowData row = new ArrowRowData(schema);
             for (int i = 1; i <= metaData.getColumnCount(); i++) {
-                System.out.println(resultSet.getObject(i));
                 row.set(i - 1, resultSet.getObject(i));
             }
             rowData.add(row);

@@ -18,21 +18,19 @@
 
 package com.aliyun.odps.utils;
 
-import com.aliyun.odps.entity.RowData;
 import com.aliyun.odps.entity.SqlLiteColumn;
+import com.aliyun.odps.entity.SqlLiteSchema;
+import com.aliyun.odps.function.CreateTable;
 import com.csvreader.CsvWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.StringWriter;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -56,11 +54,13 @@ public class SqlRunner {
             return handleRenameColumn(originSql);
         } else if (originSql.toUpperCase().contains("DROP TABLE")) {
             return handleDropTable(originSql);
+        } else if (originSql.toUpperCase().contains("PARTITION")) {
+            return "Ignored";
         }
         return executeSql(originSql);
     }
 
-    private static String executeSql(String sql) throws SQLException {
+    public static String executeSql(String sql) throws SQLException {
         try (Statement stmt = CommonUtils.getConnection().createStatement()) {
             LOG.info("execute sql: {}", sql);
             boolean hasResultSet = stmt.execute(sql);
@@ -75,101 +75,19 @@ public class SqlRunner {
         }
     }
 
-    public static void upsertData(String tableName, List<RowData> datas, List<SqlLiteColumn> schema) {
-        String[] primaryKeys = schema.stream().filter(SqlLiteColumn::isPrimaryKey).map(SqlLiteColumn::getName)
-                .toArray(String[]::new);
-        // Building a basic INSERT statement
-        StringBuilder upsertSql = new StringBuilder("INSERT INTO ");
-        upsertSql.append(tableName.toUpperCase());
-        upsertSql.append(" (");
-        upsertSql.append(String.join(", ", schema.stream().map(SqlLiteColumn::getName).toArray(String[]::new)));
-        upsertSql.append(") VALUES (");
-        upsertSql.append(String.join(", ", "?".repeat(schema.size()).split("")));
-        upsertSql.append(")");
-
-        // Add ON CONFLICT ... DO UPDATE SET clause
-        upsertSql.append(" ON CONFLICT (");
-        upsertSql.append(String.join(", ", primaryKeys));
-        upsertSql.append(") DO UPDATE SET ");
-
-        // Exclude keyColumnNames and update only non-key columns
-        for (SqlLiteColumn columns : schema) {
-            if (!columns.isPrimaryKey()) {
-                upsertSql.append(columns.getName()).append(" = EXCLUDED.").append(columns.getName()).append(", ");
-            }
-        }
-        // Remove final comma and space
-        upsertSql.setLength(upsertSql.length() - 2);
-
-        StringBuilder deleteSql = new StringBuilder("DELETE FROM " + tableName + " WHERE ");
-        for (int i = 0; i < primaryKeys.length; i++) {
-            deleteSql.append(primaryKeys[i]).append(" = ?");
-            if (i < primaryKeys.length - 1) {
-                deleteSql.append(" AND ");
-            }
-        }
-
-        List<Object[]> toUpsert = new ArrayList<>();
-        List<Object[]> toDelete = new ArrayList<>();
-        for (RowData row : datas) {
-            if (row.getRowKind() == RowData.RowKind.UPSERT) {
-                executeBatch(toDelete, deleteSql);
-                toUpsert.add(row.getData());
-            } else if (row.getRowKind() == RowData.RowKind.DELETE) {
-                executeBatch(toUpsert, upsertSql);
-                toDelete.add(row.getPkData(schema));
-            }
-        }
-        executeBatch(toDelete, deleteSql);
-        executeBatch(toUpsert, upsertSql);
-    }
-
-    private static void executeBatch(List<Object[]> batch, StringBuilder upsertSql) {
-        if (batch.isEmpty()) {
-            return;
-        }
-        // Obtain the database connection and execute the INSERT statement
-        try (Connection conn = CommonUtils.getConnection();
-                PreparedStatement pstmt = conn.prepareStatement(upsertSql.toString())) {
-
-            for (Object[] rowData : batch) {
-                for (int i = 0; i < rowData.length; i++) {
-                    pstmt.setObject(i + 1, rowData[i]);
-                }
-                pstmt.addBatch();
-            }
-            System.out.println(pstmt);
-            pstmt.executeBatch();
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        } finally {
-            batch.clear();
-        }
-    }
-
-    public static List<SqlLiteColumn> getSchema(String tableName) {
-        List<SqlLiteColumn> columns = new ArrayList<>();
-        try (Statement stmt = CommonUtils.getConnection().createStatement()) {
-            ResultSet rs = stmt.executeQuery("PRAGMA table_info('" + tableName.toUpperCase() + "')");
-
-            while (rs.next()) {
-                String name = rs.getString("name");
-                String type = rs.getString("type");
-                boolean notnull = rs.getBoolean("notnull");
-                String dfltValue = rs.getString("dflt_value");
-                boolean pk = rs.getBoolean("pk");
-                columns.add(new SqlLiteColumn(name, type, notnull, dfltValue, pk));
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-        return columns;
-    }
-
     private static String handleDropTable(String originSql) throws SQLException {
-        String noDatabasePrefix = originSql.replaceAll("DROP TABLE \\S+\\.", "DROP TABLE ");
-        noDatabasePrefix = noDatabasePrefix.replaceAll("DROP TABLE IF EXISTS \\S+\\.", "DROP TABLE IF EXISTS ");
-        return executeSql(noDatabasePrefix);
+        if (originSql.startsWith("DROP TABLE IF EXISTS")) {
+            originSql = originSql.replaceAll("DROP TABLE IF EXISTS \\S+\\.", "DROP TABLE IF EXISTS ");
+            executeSql(originSql);
+            String tableName = originSql.replaceAll("DROP TABLE IF EXISTS (\\S+);", "$1");
+            executeSql("DELETE FROM schemas WHERE table_name = '" + tableName + "';");
+        } else {
+            originSql = originSql.replaceAll("DROP TABLE \\S+\\.", "DROP TABLE ");
+            executeSql(originSql);
+            String tableName = originSql.replaceAll("DROP TABLE (\\S+);", "$1");
+            executeSql("DELETE FROM schemas WHERE table_name = '" + tableName + "';");
+        }
+        return "Success";
     }
 
     public static String handleAddColumn(String mcSql) throws SQLException {
@@ -185,42 +103,30 @@ public class SqlRunner {
         String tableName = noDatabasePrefix.replaceAll("ALTER TABLE (\\S+) ADD COLUMNS.*", "$1");
 
         String[] alterTableStatements = new String[columnDefinitions.length];
+
+        SqlLiteSchema schema = getSchema(tableName);
+        List<SqlLiteColumn> columns = schema.getColumns();
+
         for (int i = 0; i < columnDefinitions.length; i++) {
             String columnDefinition = columnDefinitions[i];
             // Adjust data types (if necessary)
             columnDefinition = columnDefinition.replace("STRING", "TEXT");
             alterTableStatements[i] = String.format("ALTER TABLE %s ADD COLUMN %s;", tableName, columnDefinition);
+
+            String[] split = columnDefinition.trim().split("\\s+");
+            columns.add(new SqlLiteColumn(split[0], split[1], false, null, false, false));
         }
 
         for (String alterTableStatement : alterTableStatements) {
             executeSql(alterTableStatement);
         }
-
+        updateSchema(tableName, new SqlLiteSchema(columns, schema.getPartitionColumns()));
         return "Success";
     }
 
     private static String handleCreateTable(String mcSql) throws SQLException {
-
-        // Remove all COMMENT clauses considering backticks
-        String noComments = mcSql.replaceAll("\\s+COMMENT\\s+'[^']+'", "");
-
-        // Remove database prefix before the table name (if present)
-        String noDatabasePrefix =
-                noComments.replaceAll("CREATE TABLE IF NOT EXISTS \\S+\\.", "CREATE TABLE IF NOT EXISTS ");
-        noDatabasePrefix = noDatabasePrefix.replaceAll("CREATE TABLE \\S+\\.", "CREATE TABLE ");
-
-        // Remove unsupported TBLPROPERTIES part
-        String noTblProperties = noDatabasePrefix.replaceAll("TBLPROPERTIES\\s*\\([^\\)]+\\)", "");
-
-        // Adjust data types (if necessary)
-        String sqliteCompatibleTypes = noTblProperties.replace("STRING", "TEXT");
-
-        // Ensure the statement ends with a semicolon
-        String withSemicolon = sqliteCompatibleTypes.trim();
-        if (!withSemicolon.endsWith(";")) {
-            withSemicolon += ";";
-        }
-        return executeSql(withSemicolon);
+        CreateTable.execute(mcSql);
+        return "Success";
     }
 
     public static String handleDropColumn(String mcSql) throws SQLException {
@@ -233,7 +139,7 @@ public class SqlRunner {
         String[] columnsToDrop =
                 noDatabasePrefix.replaceAll("ALTER TABLE \\S+ DROP COLUMNS ", "").split(",");
 
-        List<SqlLiteColumn> originSchema = getSchema(tableName);
+        List<SqlLiteColumn> originSchema = getDataSchema(tableName);
 
         Set<String> dropSet = Arrays.stream(columnsToDrop).collect(Collectors.toSet());
 
@@ -264,6 +170,11 @@ public class SqlRunner {
         executeSql(dropOldTableSQL);
         executeSql(renameTableSQL);
 
+        SqlLiteSchema schema = getSchema(tableName);
+        List<SqlLiteColumn> columns = schema.getColumns();
+        columns.removeIf(c -> dropSet.contains(c.getName().toUpperCase()));
+        updateSchema(tableName, new SqlLiteSchema(columns, schema.getPartitionColumns()));
+
         return "Success";
     }
 
@@ -289,7 +200,44 @@ public class SqlRunner {
         String renameColumnSql = String.format("ALTER TABLE %s RENAME COLUMN %s TO %s;", tableName, oldName,
                 newName);
         executeSql(renameColumnSql);
+
+        SqlLiteSchema schema = getSchema(tableName);
+        List<SqlLiteColumn> columns = schema.getColumns();
+        for (SqlLiteColumn column : columns) {
+            if (column.getName().equals(oldName)) {
+                column.setName(newName);
+            }
+        }
+        updateSchema(tableName, new SqlLiteSchema(columns, schema.getPartitionColumns()));
         return "Success";
+    }
+
+    public static SqlLiteSchema getSchema(String tableName) throws SQLException {
+        try (Statement stmt = CommonUtils.getConnection().createStatement()) {
+            ResultSet rs = stmt.executeQuery("SELECT schema FROM schemas WHERE table_name = '" + tableName.toUpperCase() + "';");
+            if (rs.next()) {
+                String schema = rs.getString("schema");
+                return SqlLiteSchema.fromJson(schema);
+            }
+        }
+        throw new SQLException("Table schema " + tableName + " not found");
+    }
+
+    private static void updateSchema(String tableName, SqlLiteSchema schema) throws SQLException {
+        try (Statement stmt = CommonUtils.getConnection().createStatement()) {
+            stmt.executeUpdate(
+                    "UPDATE schemas SET schema = '" + schema.toJson() + "' WHERE table_name = '" + tableName +
+                            "';");
+        }
+    }
+
+    public static List<SqlLiteColumn> getDataSchema(String tableName) {
+        try {
+            return getSchema(tableName).getColumns();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
     }
 
     private static String processResultSet(ResultSet resultSet) throws SQLException, IOException {

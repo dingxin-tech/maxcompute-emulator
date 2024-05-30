@@ -49,7 +49,7 @@ public class TableService {
         JsonArray columns = new JsonArray();
         JsonArray primaryKey = new JsonArray();
 
-        List<SqlLiteColumn> schema = getSchema(tableName);
+        List<SqlLiteColumn> schema = getDataSchema(tableName);
         for (SqlLiteColumn column : schema) {
             columns.add(toJson(column.getName(), TypeConvertUtils.convertToMaxComputeType(column.getType()),
                     column.isNotNull(), column.getDefaultValue()));
@@ -85,9 +85,17 @@ public class TableService {
         }
     }
 
-    public List<SqlLiteColumn> getSchema(String tableName) {
+    public List<SqlLiteColumn> getDataSchema(String tableName) {
         if (StringUtils.isNotEmpty(tableName)) {
-            return SqlRunner.getSchema(tableName);
+            return SqlRunner.getDataSchema(tableName);
+        } else {
+            return new ArrayList<>();
+        }
+    }
+
+    public List<SqlLiteColumn> getPartitionSchema(String tableName) throws SQLException {
+        if (StringUtils.isNotEmpty(tableName)) {
+            return SqlRunner.getSchema(tableName).getPartitionColumns();
         } else {
             return new ArrayList<>();
         }

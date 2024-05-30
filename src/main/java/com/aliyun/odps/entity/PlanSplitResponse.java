@@ -74,7 +74,7 @@ public class PlanSplitResponse {
             // DataColumns
             for (SqlLiteColumn column : readSchema) {
                 // Assumes the existence of a method to convert Column to JsonObject
-                dataColumnsJson.add(column.toJson());
+                dataColumnsJson.add(column.toOdpsJson());
             }
             dataSchemaJson.add("DataColumns", dataColumnsJson);
 

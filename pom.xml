@@ -129,6 +129,13 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!--antlr4-->
+        <dependency>
+            <groupId>org.antlr</groupId>
+            <artifactId>antlr4-runtime</artifactId>
+            <version>4.13.1</version>
+        </dependency>
+
         <!--test-->
         <dependency>
             <groupId>com.aliyun.odps</groupId>
@@ -143,6 +150,26 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <jvmArguments>--add-opens=java.base/java.nio=ALL-UNNAMED</jvmArguments>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.antlr</groupId>
+                <artifactId>antlr4-maven-plugin</artifactId>
+                <version>4.13.1</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>antlr4</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <sourceDirectory>${project.basedir}/src/main/java/com/aliyun/odps/antlr4</sourceDirectory>
+                    <outputDirectory>${project.basedir}/src/main/java/com/aliyun/odps/antlr4/generate</outputDirectory>
+                </configuration>
             </plugin>
         </plugins>
     </build>
