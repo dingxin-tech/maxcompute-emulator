@@ -58,9 +58,6 @@ public class CreateTable {
         walker.walk(listener, tree);
 
         SqlRunner.executeSql(listener.getResult());
-        if (!Table.of("schemas").exist()) {
-            SqlRunner.executeSql("CREATE TABLE schemas(table_name TEXT, schema TEXT);");
-        }
         SqlRunner.executeSql(
                 "INSERT INTO schemas VALUES ('" + listener.getTableName() + "', '" + listener.getSchema().toJson() +
                         "');");
