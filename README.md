@@ -1,4 +1,6 @@
 # MaxCompute Emulator
+![GitHub License](https://img.shields.io/github/license/dingxin-tech/maxcompute-emulator)
+![Docker Image Version](https://img.shields.io/docker/v/maxcompute/maxcompute-emulator)
 
 ## Introduction
 
