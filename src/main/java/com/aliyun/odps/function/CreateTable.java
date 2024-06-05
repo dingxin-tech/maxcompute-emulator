@@ -73,12 +73,12 @@ public class CreateTable {
 
         @Override
         public void enterTableName(MaxComputeSQLParser.TableNameContext ctx) {
-            tableName = ctx.IDENTIFIER().get(ctx.IDENTIFIER().size() - 1).getText();
+            tableName = ctx.IDENTIFIER().get(ctx.IDENTIFIER().size() - 1).getText().toUpperCase();
         }
 
         @Override
         public void enterColumnDef(MaxComputeSQLParser.ColumnDefContext ctx) {
-            String columnId = ctx.quotedIdentifier().IDENTIFIER().getText();
+            String columnId = ctx.quotedIdentifier().IDENTIFIER().getText().toUpperCase();
             String columnType = TypeConvertUtils.convertToSqlLiteType(ctx.dataType().getText());
             boolean notNull = ctx.notNull() != null;
             dataColumns.add(new SqlLiteColumn(columnId, columnType, notNull, null, false, false));
@@ -92,14 +92,14 @@ public class CreateTable {
         @Override
         public void enterPrimaryKey(MaxComputeSQLParser.PrimaryKeyContext ctx) {
             for (int i = 0; i < ctx.quotedIdentifier().size(); i++) {
-                String pkColumn = ctx.quotedIdentifier(i).IDENTIFIER().getText();
+                String pkColumn = ctx.quotedIdentifier(i).IDENTIFIER().getText().toUpperCase();
                 dataColumns.stream().filter(c -> c.getName().equals(pkColumn)).findFirst().get().setPrimaryKey(true);
             }
         }
 
         @Override
         public void enterPartitionColumnDef(MaxComputeSQLParser.PartitionColumnDefContext ctx) {
-            String columnId = ctx.quotedIdentifier().IDENTIFIER().getText();
+            String columnId = ctx.quotedIdentifier().IDENTIFIER().getText().toUpperCase();
             String columnType = ctx.dataType().getText();
             partitionColumns.add(new SqlLiteColumn(columnId, columnType, ctx.notNull() != null, null, false, true));
         }
@@ -132,16 +132,18 @@ public class CreateTable {
                     result.append(" NOT NULL");
                 }
             }
-
-            result.append(", PRIMARY KEY(");
-            for (String pk : primaryKey) {
-                result.append(pk).append(",");
+            // partition columns treated as primary key
+            if (!primaryKey.isEmpty() || !partitionColumns.isEmpty()) {
+                result.append(", PRIMARY KEY(");
+                for (String pk : primaryKey) {
+                    result.append(pk).append(",");
+                }
+                for (SqlLiteColumn column : partitionColumns) {
+                    result.append(column.getName()).append(",");
+                }
+                result.deleteCharAt(result.length() - 1);
+                result.append(")");
             }
-            for (SqlLiteColumn column : partitionColumns) {
-                result.append(column.getName()).append(",");
-            }
-            result.deleteCharAt(result.length() - 1);
-            result.append(")");
 
             result.append(")");
             return result.toString();

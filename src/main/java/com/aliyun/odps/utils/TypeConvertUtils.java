@@ -82,5 +82,17 @@ public class TypeConvertUtils {
         return typeName;
     }
 
+    public static Object convertToMaxComputeValue(int columnType, Object object) {
+        if (object == null) {
+            return null;
+        }
+        return switch (columnType) {
+            case java.sql.Types.TINYINT -> ((Number) object).byteValue();
+            case java.sql.Types.SMALLINT -> ((Number) object).shortValue();
+            case java.sql.Types.INTEGER -> ((Number) object).intValue();
+            case java.sql.Types.BIGINT -> ((Number) object).longValue();
+            default -> object;
+        };
+    }
 }
 

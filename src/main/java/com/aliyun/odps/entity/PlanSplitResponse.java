@@ -37,8 +37,8 @@ public class PlanSplitResponse {
     private Long expirationTime;
     private String errorMessage;
     private List<SqlLiteColumn> readSchema;
-    private long recordCount;
-    private int splitCount;
+    private Long recordCount;
+    private Integer splitCount;
 
     public String toJson() {
         Gson gson = new GsonBuilder().disableHtmlEscaping().create();
@@ -86,8 +86,12 @@ public class PlanSplitResponse {
 
         // Record count and splits count (InputSplitAssigner)
         // This part requires a way to identify the type of inputSplitAssigner as well as methods to get the relevant values
-        jsonRoot.addProperty("RecordCount", recordCount);
-        jsonRoot.addProperty("SplitsCount", splitCount);
+        if (recordCount != null) {
+            jsonRoot.addProperty("RecordCount", recordCount);
+        }
+        if (splitCount != null) {
+            jsonRoot.addProperty("SplitsCount", splitCount);
+        }
 
         return gson.toJson(jsonRoot);
     }

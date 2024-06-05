@@ -21,6 +21,7 @@ package com.aliyun.odps.service;
 import com.aliyun.odps.entity.PlanSplitRequest;
 import com.aliyun.odps.entity.PlanSplitResponse;
 import com.aliyun.odps.entity.SqlLiteColumn;
+import com.aliyun.odps.entity.TableData;
 import com.aliyun.odps.utils.CommonUtils;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
@@ -29,7 +30,6 @@ import org.apache.arrow.vector.types.pojo.Schema;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import tech.dingxin.ArrowDataSerializer;
-import tech.dingxin.ArrowRowData;
 
 import java.io.OutputStream;
 import java.sql.Connection;
@@ -58,28 +58,29 @@ public class StorageService {
         try {
             String sessionId = CommonUtils.generateUUID();
             sessionIdTableMap.put(sessionId, request.getTable());
-            long rowCount = tableService.getRowCount(request.getTable());
             List<SqlLiteColumn> schema = tableService.getDataSchema(request.getTable());
-            return new PlanSplitResponse(sessionId, null, null, schema, rowCount, 1);
+            if (request.getSplitMode().equals("RowOffset")) {
+                long rowCount = tableService.getRowCount(request.getTable());
+                return new PlanSplitResponse(sessionId, null, null, schema, rowCount, null);
+            } else {
+                return new PlanSplitResponse(sessionId, null, null, schema, null, 1);
+            }
         } catch (Exception e) {
             e.printStackTrace();
-            return new PlanSplitResponse(null, null, e.getMessage(), null, 0, 0);
+            return new PlanSplitResponse(null, null, e.getMessage(), null, null, null);
         }
     }
 
-    public void readTable(String table, String sessionId, int maxBatchRows, int splitIndex, OutputStream outputStream)
+    public void readTable(String table, String sessionId, Long maxBatchRows, Integer splitIndex, OutputStream outputStream)
             throws Exception {
-        List<ArrowRowData> data = read(table);
-        if (data.isEmpty()) {
-            return;
-        }
-        Schema schema = data.get(0).getSchema();
+        TableData tableData = read(table);
+        Schema schema = tableData.getSchema();
         try (ArrowDataSerializer serializer = new ArrowDataSerializer(schema, allocator);
                 ArrowStreamWriter arrowWriter = new ArrowStreamWriter(serializer.getVectorSchemaRoot(), null,
                         outputStream)) {
             arrowWriter.start();
-            for (int i = 0; i < data.size(); i++) {
-                serializer.add(data.get(i));
+            for (int i = 0; i < tableData.getData().size(); i++) {
+                serializer.add(tableData.getData().get(i));
                 if ((i + 1) % 4096 == 0) {
                     serializer.getVectorSchemaRoot();
                     arrowWriter.writeBatch();
@@ -93,14 +94,14 @@ public class StorageService {
         }
     }
 
-    private List<ArrowRowData> read(String tableName) throws Exception {
+    private TableData read(String tableName) throws Exception {
         try (
                 Connection conn = CommonUtils.getConnection();
                 Statement stmt = conn.createStatement();
                 ResultSet rs = stmt.executeQuery(
                         "select * from " + tableName.toUpperCase() + ";")
         ) {
-            return CommonUtils.convertToRowData(rs);
+            return CommonUtils.convertToTableData(rs);
         }
     }
 }

@@ -58,8 +58,8 @@ public class StorageReadController {
                                                            @PathVariable("schema") String schema,
                                                            @PathVariable("table") String table,
                                                            @RequestParam("session_id") String sessionId,
-                                                           @RequestParam("max_batch_rows") int maxBatchRows,
-                                                           @RequestParam("split_index") int splitIndex) {
+                                                           @RequestParam(value = "max_batch_rows", required = false) Long maxBatchRows,
+                                                           @RequestParam(value = "split_index", required = false) Integer splitIndex) {
         StreamingResponseBody responseBody = outputStream -> {
             // Setup Arrow objects. Example here assumes a custom method to create these.
             // This should be your actual logic to generate VectorSchemaRoot.

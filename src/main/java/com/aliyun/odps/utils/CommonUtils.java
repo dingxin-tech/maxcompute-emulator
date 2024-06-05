@@ -18,6 +18,7 @@
 
 package com.aliyun.odps.utils;
 
+import com.aliyun.odps.entity.TableData;
 import org.apache.arrow.vector.types.pojo.Schema;
 import tech.dingxin.ArrowRowData;
 import tech.dingxin.jdbc.JdbcUtils;
@@ -45,18 +46,21 @@ public class CommonUtils {
         return DriverManager.getConnection(URL);
     }
 
-    public static List<ArrowRowData> convertToRowData(ResultSet resultSet) throws Exception {
+    public static TableData convertToTableData(ResultSet resultSet) throws Exception {
         List<ArrowRowData> rowData = new ArrayList<>();
         ResultSetMetaData metaData = resultSet.getMetaData();
         Schema schema = JdbcUtils.toArrowSchema(metaData, SqlLiteDialect.INSTANCE);
 
+
         while (resultSet.next()) {
             ArrowRowData row = new ArrowRowData(schema);
             for (int i = 1; i <= metaData.getColumnCount(); i++) {
-                row.set(i - 1, resultSet.getObject(i));
+                int columnType = metaData.getColumnType(i);
+                Object value = TypeConvertUtils.convertToMaxComputeValue(columnType, resultSet.getObject(i));
+                row.set(i - 1, value);
             }
             rowData.add(row);
         }
-        return rowData;
+        return new TableData(rowData, schema);
     }
 }
