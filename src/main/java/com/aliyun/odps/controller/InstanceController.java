@@ -21,6 +21,7 @@ package com.aliyun.odps.controller;
 import com.aliyun.odps.Job;
 import com.aliyun.odps.OdpsException;
 import com.aliyun.odps.common.MessageResponse;
+import com.aliyun.odps.entity.ErrorMessage;
 import com.aliyun.odps.entity.SQLResult;
 import com.aliyun.odps.entity.internal.instance.Instance;
 import com.aliyun.odps.entity.internal.instance.InstanceResultModel;
@@ -97,7 +98,7 @@ public class InstanceController {
             return new ResponseEntity<>(new MessageResponse("Created"), headers, HttpStatus.CREATED);
         } catch (Exception e) {
             LOG.error("create instance error", e);
-            return new ResponseEntity<>(new MessageResponse(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+            return new ResponseEntity<>(ErrorMessage.of(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 

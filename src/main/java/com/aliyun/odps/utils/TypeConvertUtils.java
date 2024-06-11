@@ -61,7 +61,7 @@ public class TypeConvertUtils {
             return TypeInfoFactory.FLOAT;
         }
         if ("CHARACTER".equals(typeName) || "NCHAR".equals(typeName) || "NATIVE CHARACTER".equals(typeName) ||
-                "CHAR".equals(typeName)) {
+                "CHAR".equals(typeName) || "STRING".equals(typeName)) {
             return TypeInfoFactory.STRING;
         }
         if ("VARCHAR".equals(typeName) || "VARYING CHARACTER".equals(typeName) ||

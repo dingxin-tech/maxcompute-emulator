@@ -18,10 +18,12 @@
 
 package com.aliyun.odps.service;
 
+import com.aliyun.odps.PartitionSpec;
 import com.aliyun.odps.entity.PlanSplitRequest;
 import com.aliyun.odps.entity.PlanSplitResponse;
 import com.aliyun.odps.entity.SqlLiteColumn;
 import com.aliyun.odps.entity.TableData;
+import com.aliyun.odps.entity.TableId;
 import com.aliyun.odps.utils.CommonUtils;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
@@ -38,13 +40,14 @@ import java.sql.Statement;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
  */
 @Service
 public class StorageService {
-    private Map<String, String> sessionIdTableMap;
+    private Map<String, TableId> sessionIdTableMap;
     @Autowired
     private TableService tableService;
 
@@ -57,7 +60,7 @@ public class StorageService {
     public PlanSplitResponse planSplit(PlanSplitRequest request) {
         try {
             String sessionId = CommonUtils.generateUUID();
-            sessionIdTableMap.put(sessionId, request.getTable());
+            sessionIdTableMap.put(sessionId, TableId.of(request.getTable(), request.getRequiredPartitions()));
             List<SqlLiteColumn> schema = tableService.getDataSchema(request.getTable());
             if (request.getSplitMode().equals("RowOffset")) {
                 long rowCount = tableService.getRowCount(request.getTable());
@@ -71,9 +74,10 @@ public class StorageService {
         }
     }
 
-    public void readTable(String table, String sessionId, Long maxBatchRows, Integer splitIndex, OutputStream outputStream)
+    public void readTable(String table, String sessionId, Long maxBatchRows, Integer splitIndex,
+                          OutputStream outputStream)
             throws Exception {
-        TableData tableData = read(table);
+        TableData tableData = read(sessionIdTableMap.get(sessionId));
         Schema schema = tableData.getSchema();
         try (ArrowDataSerializer serializer = new ArrowDataSerializer(schema, allocator);
                 ArrowStreamWriter arrowWriter = new ArrowStreamWriter(serializer.getVectorSchemaRoot(), null,
@@ -94,12 +98,40 @@ public class StorageService {
         }
     }
 
-    private TableData read(String tableName) throws Exception {
+    private TableData read(TableId tableId) throws Exception {
+        StringBuilder sql;
+        if (tableId.getPartitionNames() == null && tableId.getPartitionName() == null) {
+            sql = new StringBuilder("select * from " + tableId.getTableName().toUpperCase() + ";");
+        } else if (tableId.getPartitionName() != null) {
+            PartitionSpec partitionSpec = new PartitionSpec(tableId.getPartitionName());
+            Set<String> keys = partitionSpec.keys();
+            sql = new StringBuilder("select * from " + tableId.getTableName().toUpperCase() + " where ");
+            for (String key : keys) {
+                sql.append(key).append(" = '").append(partitionSpec.get(key)).append("' and ");
+            }
+            sql.delete(sql.length() - 4, sql.length());
+            sql.append(";");
+        } else {
+            sql = new StringBuilder("select * from " + tableId.getTableName().toUpperCase() + " where ");
+            List<String> partitionNames = tableId.getPartitionNames();
+            for (String partitionName : partitionNames) {
+                sql.append("(");
+                PartitionSpec partitionSpec = new PartitionSpec(partitionName);
+                Set<String> keys = partitionSpec.keys();
+                for (String key : keys) {
+                    sql.append(key).append(" = '").append(partitionSpec.get(key)).append("' and ");
+                }
+                sql.delete(sql.length() - 4, sql.length());
+
+                sql.append(") or ");
+            }
+            sql.delete(sql.length() - 4, sql.length());
+            sql.append(";");
+        }
         try (
                 Connection conn = CommonUtils.getConnection();
                 Statement stmt = conn.createStatement();
-                ResultSet rs = stmt.executeQuery(
-                        "select * from " + tableName.toUpperCase() + ";")
+                ResultSet rs = stmt.executeQuery(sql.toString());
         ) {
             return CommonUtils.convertToTableData(rs);
         }

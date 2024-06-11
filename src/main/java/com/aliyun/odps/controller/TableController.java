@@ -18,6 +18,7 @@
 
 package com.aliyun.odps.controller;
 
+import com.aliyun.odps.entity.ErrorMessage;
 import com.aliyun.odps.entity.internal.table.ListTablesResponse;
 import com.aliyun.odps.entity.internal.table.TableModel;
 import com.aliyun.odps.service.TableService;
@@ -55,12 +56,16 @@ public class TableController {
     @ResponseBody
     public ResponseEntity<String> getTable(@PathVariable("projectName") String projectName,
                                            @PathVariable("schemaName") String schemaName,
-                                           @PathVariable("tableId") String tableId) throws Exception {
+                                           @PathVariable("tableId") String tableId) {
         if (!tableService.tableExist(tableId)) {
-            return new ResponseEntity<>("table " + tableId + " not found", null, HttpStatus.NOT_FOUND);
+            return new ResponseEntity<>(ErrorMessage.of("table " + tableId + " not found"), null, HttpStatus.NOT_FOUND);
         }
-        String responce = marshal(new TableModel(tableId, tableService.reloadTable(tableId)));
-        return ResponseEntity.ok(responce);
+        try {
+            String responce = marshal(new TableModel(tableId, tableService.reloadTable(tableId)));
+            return ResponseEntity.ok(responce);
+        } catch (Exception e) {
+            return new ResponseEntity<>(ErrorMessage.of(e.getMessage()), null, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
     @GetMapping("/projects/{projectName}/tables")

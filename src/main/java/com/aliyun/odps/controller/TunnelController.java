@@ -19,6 +19,7 @@
 package com.aliyun.odps.controller;
 
 import com.aliyun.odps.common.Options;
+import com.aliyun.odps.entity.ErrorMessage;
 import com.aliyun.odps.entity.RowData;
 import com.aliyun.odps.entity.SqlLiteColumn;
 import com.aliyun.odps.entity.TableId;
@@ -80,127 +81,154 @@ public class TunnelController {
         if (!tableService.tableExist(tableId)) {
             return new ResponseEntity<>("table not exist", HttpStatus.NOT_FOUND);
         }
-        JsonObject result = new JsonObject();
-        boolean commit = false;
-        // sessionId
-        if (upsertId.isEmpty()) {
-            upsertId = CommonUtils.generateUUID();
-            upsertSessionMap.put(upsertId, TableId.of(tableId, partition));
-            LOG.info("create upsert session {} for table {}", upsertId, tableId);
-        } else {
-            upsertSessionMap.remove(upsertId);
-            commit = true;
-            LOG.info("commit upsert session {} ", upsertId, tableId);
-        }
-
-        result.add("id", new JsonPrimitive(upsertId));
-        // tunnelTableSchema
-        JsonObject schema = new JsonObject();
-        JsonArray columns = new JsonArray();
-        JsonArray hashKeys = new JsonArray();
-
-        List<SqlLiteColumn> sqlLiteSchema = tableService.getDataSchema(tableId.toUpperCase());
-        for (int cid = 0; cid < sqlLiteSchema.size(); cid++) {
-            SqlLiteColumn column = sqlLiteSchema.get(cid);
-            JsonObject columnJson = new JsonObject();
-            columnJson.add("name", new JsonPrimitive(column.getName()));
-            columnJson.add("type",
-                    new JsonPrimitive(TypeConvertUtils.convertToMaxComputeType(column.getType()).getTypeName()));
-            columnJson.add("nullable", new JsonPrimitive(column.isNotNull()));
-            columnJson.add("column_id", new JsonPrimitive(cid));
-            columns.add(columnJson);
-            if (column.isPrimaryKey()) {
-                hashKeys.add(new JsonPrimitive(column.getName()));
+        try {
+            JsonObject result = new JsonObject();
+            boolean commit = false;
+            // sessionId
+            if (upsertId.isEmpty()) {
+                upsertId = CommonUtils.generateUUID();
+                upsertSessionMap.put(upsertId, TableId.of(tableId, partition));
+                LOG.info("create upsert session {} for table {}", upsertId, tableId);
+            } else {
+                upsertSessionMap.remove(upsertId);
+                commit = true;
+                LOG.info("commit upsert session {} ", upsertId, tableId);
             }
+
+            result.add("id", new JsonPrimitive(upsertId));
+            // tunnelTableSchema
+            JsonObject schema = new JsonObject();
+            JsonArray columns = new JsonArray();
+            JsonArray hashKeys = new JsonArray();
+
+            List<SqlLiteColumn> sqlLiteSchema = tableService.getDataSchema(tableId.toUpperCase());
+            for (int cid = 0; cid < sqlLiteSchema.size(); cid++) {
+                SqlLiteColumn column = sqlLiteSchema.get(cid);
+                JsonObject columnJson = new JsonObject();
+                columnJson.add("name", new JsonPrimitive(column.getName()));
+                columnJson.add("type",
+                        new JsonPrimitive(TypeConvertUtils.convertToMaxComputeType(column.getType()).getTypeName()));
+                columnJson.add("nullable", new JsonPrimitive(column.isNotNull()));
+                columnJson.add("column_id", new JsonPrimitive(cid));
+                columns.add(columnJson);
+                if (column.isPrimaryKey()) {
+                    hashKeys.add(new JsonPrimitive(column.getName()));
+                }
+            }
+            schema.add("columns", columns);
+
+            JsonArray partitionColumns = new JsonArray();
+            List<SqlLiteColumn> sqlLitePartitionSchema = tableService.getPartitionSchema(tableId.toUpperCase());
+            for (int cid = 0; cid < sqlLitePartitionSchema.size(); cid++) {
+                SqlLiteColumn column = sqlLitePartitionSchema.get(cid);
+                JsonObject columnJson = new JsonObject();
+                columnJson.add("name", new JsonPrimitive(column.getName()));
+                columnJson.add("type",
+                        new JsonPrimitive(TypeConvertUtils.convertToMaxComputeType(column.getType()).getTypeName()));
+                columnJson.add("nullable", new JsonPrimitive(column.isNotNull()));
+                columnJson.add("column_id", new JsonPrimitive(cid));
+                partitionColumns.add(columnJson);
+            }
+            schema.add("partitionKeys", partitionColumns);
+            result.add("schema", schema);
+
+            // hash_key
+            result.add("hash_key", hashKeys);
+
+            // hasher
+            result.add("hasher", new JsonPrimitive("default"));
+
+            // slots
+            JsonArray slots = new JsonArray();
+            JsonObject slot = new JsonObject();
+            slot.add("slot_id", new JsonPrimitive(0));
+            JsonArray buckets = new JsonArray();
+            buckets.add(0);
+            slot.add("buckets", buckets);
+            slot.add("worker_addr", new JsonPrimitive(Options.ENDPOINT));
+            slots.add(slot);
+
+            result.add("slots", slots);
+            if (commit) {
+                result.add("status", new JsonPrimitive("committed"));
+            } else {
+                result.add("status", new JsonPrimitive("normal"));
+            }
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("x-odps-request-id", upsertId);
+            return new ResponseEntity<>(result.toString(), headers, HttpStatus.OK);
+        } catch (Exception e) {
+            LOG.error("create upsert session error", e);
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("x-odps-request-id", upsertId);
+            return new ResponseEntity(e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
         }
-        schema.add("columns", columns);
-        //TODO: schema.add("partitionKeys", columns);
-        result.add("schema", schema);
-
-        // hash_key
-        result.add("hash_key", hashKeys);
-
-        // hasher
-        result.add("hasher", new JsonPrimitive("default"));
-
-        // slots
-        JsonArray slots = new JsonArray();
-        JsonObject slot = new JsonObject();
-        slot.add("slot_id", new JsonPrimitive(0));
-        JsonArray buckets = new JsonArray();
-        buckets.add(0);
-        slot.add("buckets", buckets);
-        slot.add("worker_addr", new JsonPrimitive(Options.ENDPOINT));
-        slots.add(slot);
-
-        result.add("slots", slots);
-        if (commit) {
-            result.add("status", new JsonPrimitive("committed"));
-        } else {
-            result.add("status", new JsonPrimitive("normal"));
-        }
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("x-odps-request-id", upsertId);
-        return new ResponseEntity<>(result.toString(), headers, HttpStatus.OK);
     }
 
     @GetMapping("/projects/{projectName}/tables/{tableId}/upserts")
     @ResponseBody
     public ResponseEntity reloadUpsertSession(@RequestParam("upsertid") String sessionId) {
-        JsonObject result = new JsonObject();
-        // sessionId
+        try {
+            JsonObject result = new JsonObject();
+            // sessionId
 
-        TableId tableId = upsertSessionMap.getOrDefault(sessionId, new TableId());
+            TableId tableId = upsertSessionMap.getOrDefault(sessionId, new TableId());
 
-        result.add("id", new JsonPrimitive(sessionId));
-        // tunnelTableSchema
-        JsonObject schema = new JsonObject();
-        JsonArray columns = new JsonArray();
-        JsonArray hashKeys = new JsonArray();
+            result.add("id", new JsonPrimitive(sessionId));
+            // tunnelTableSchema
+            JsonObject schema = new JsonObject();
+            JsonArray columns = new JsonArray();
+            JsonArray hashKeys = new JsonArray();
 
-        List<SqlLiteColumn> sqlLiteSchema = tableService.getDataSchema(tableId.getTableName());
-        for (int cid = 0; cid < sqlLiteSchema.size(); cid++) {
-            SqlLiteColumn column = sqlLiteSchema.get(cid);
-            if (column.isPartitionKey()) {
-                continue;
+            List<SqlLiteColumn> sqlLiteSchema = tableService.getDataSchema(tableId.getTableName());
+            for (int cid = 0; cid < sqlLiteSchema.size(); cid++) {
+                SqlLiteColumn column = sqlLiteSchema.get(cid);
+                if (column.isPartitionKey()) {
+                    continue;
+                }
+                JsonObject columnJson = new JsonObject();
+                columnJson.add("name", new JsonPrimitive(column.getName()));
+                columnJson.add("type",
+                        new JsonPrimitive(TypeConvertUtils.convertToMaxComputeType(column.getType()).getTypeName()));
+                columnJson.add("nullable", new JsonPrimitive(column.isNotNull()));
+                columnJson.add("column_id", new JsonPrimitive(cid));
+                columns.add(columnJson);
+                if (column.isPrimaryKey()) {
+                    hashKeys.add(new JsonPrimitive(column.getName()));
+                }
             }
-            JsonObject columnJson = new JsonObject();
-            columnJson.add("name", new JsonPrimitive(column.getName()));
-            columnJson.add("type",
-                    new JsonPrimitive(TypeConvertUtils.convertToMaxComputeType(column.getType()).getTypeName()));
-            columnJson.add("nullable", new JsonPrimitive(column.isNotNull()));
-            columnJson.add("column_id", new JsonPrimitive(cid));
-            columns.add(columnJson);
-            if (column.isPrimaryKey()) {
-                hashKeys.add(new JsonPrimitive(column.getName()));
-            }
+            schema.add("columns", columns);
+            //TODO: schema.add("partitionKeys", columns);
+            result.add("schema", schema);
+
+            // hash_key
+            result.add("hash_key", hashKeys);
+
+            // hasher
+            result.add("hasher", new JsonPrimitive("default"));
+
+            // slots
+            JsonArray slots = new JsonArray();
+            JsonObject slot = new JsonObject();
+            slot.add("slot_id", new JsonPrimitive(0));
+            JsonArray buckets = new JsonArray();
+            buckets.add(0);
+            slot.add("buckets", buckets);
+            slot.add("worker_addr", new JsonPrimitive(Options.ENDPOINT));
+            slots.add(slot);
+
+            result.add("slots", slots);
+            result.add("status", new JsonPrimitive(tableId.getTableName() == null ? "committed" : "normal"));
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("x-odps-request-id", sessionId);
+            return new ResponseEntity<>(result.toString(), headers, HttpStatus.OK);
+        } catch (Exception e) {
+            LOG.error("create upsert session error", e);
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("x-odps-request-id", sessionId);
+            return new ResponseEntity(ErrorMessage.of(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
         }
-        schema.add("columns", columns);
-        //TODO: schema.add("partitionKeys", columns);
-        result.add("schema", schema);
-
-        // hash_key
-        result.add("hash_key", hashKeys);
-
-        // hasher
-        result.add("hasher", new JsonPrimitive("default"));
-
-        // slots
-        JsonArray slots = new JsonArray();
-        JsonObject slot = new JsonObject();
-        slot.add("slot_id", new JsonPrimitive(0));
-        JsonArray buckets = new JsonArray();
-        buckets.add(0);
-        slot.add("buckets", buckets);
-        slot.add("worker_addr", new JsonPrimitive(Options.ENDPOINT));
-        slots.add(slot);
-
-        result.add("slots", slots);
-        result.add("status", new JsonPrimitive(tableId.getTableName() == null ? "committed" : "normal"));
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("x-odps-request-id", sessionId);
-        return new ResponseEntity<>(result.toString(), headers, HttpStatus.OK);
     }
 
     @PutMapping("/projects/{projectName}/tables/{tableId}/upserts")
@@ -226,10 +254,9 @@ public class TunnelController {
             return new ResponseEntity<>("OK", headers, HttpStatus.OK);
         } catch (Exception e) {
             LOG.error("flush data error", e);
-            return new ResponseEntity(e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+            return new ResponseEntity(ErrorMessage.of(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
-
     @GetMapping("/projects/{projectName}/tunnel")
     @ResponseBody
     public String getTunnelEndpoint() {

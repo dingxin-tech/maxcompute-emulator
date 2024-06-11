@@ -33,9 +33,11 @@ import com.aliyun.odps.tunnel.TableTunnel;
 import com.aliyun.odps.tunnel.io.CompressOption;
 import com.aliyun.odps.tunnel.streams.UpsertStream;
 import com.aliyun.odps.type.TypeInfoFactory;
+import com.aliyun.odps.utils.CommonUtils;
+import com.google.common.collect.ImmutableList;
 import org.apache.arrow.vector.VectorSchemaRoot;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -53,20 +55,17 @@ class StorageReadTest {
                     .withTunnelEndpoint(odps.getTunnelEndpoint()).withCredentials(
                             Credentials.newBuilder().withAccount(odps.getAccount()).build()).build();
 
-    @BeforeEach
-    void beforeAll() throws OdpsException {
-        odps.tables().create("project", "TABLE1",
-                TableSchema.builder().withColumn(Column.newBuilder("id", TypeInfoFactory.BIGINT).build())
-                        .withStringColumn("name").build());
-    }
-
-    @AfterEach
-    void afterAll() throws OdpsException {
-        odps.tables().delete("project", "TABLE1", true);
+    @BeforeAll
+    static void beforeAll() throws OdpsException {
+        CommonUtils.initEmulator();
     }
 
     @Test
-    void testPlanSplits() throws IOException {
+    void testPlanSplits() throws IOException, OdpsException {
+        odps.tables().delete("project", "TABLE1", true);
+        odps.tables().create("project", "TABLE1",
+                TableSchema.builder().withColumn(Column.newBuilder("id", TypeInfoFactory.BIGINT).build())
+                        .withStringColumn("name").build());
         TableBatchReadSession tableBatchReadSession =
                 new TableReadSessionBuilder().withSettings(environmentSettings)
                         .identifier(TableIdentifier.of("project", "TABLE1")).buildBatchReadSession();
@@ -78,7 +77,11 @@ class StorageReadTest {
     }
 
     @Test
-    void testReadTable() throws IOException {
+    void testReadTable() throws IOException, OdpsException {
+        odps.tables().delete("project", "TABLE1", true);
+        odps.tables().create("project", "TABLE1",
+                TableSchema.builder().withColumn(Column.newBuilder("id", TypeInfoFactory.BIGINT).build())
+                        .withStringColumn("name").build());
         TableBatchReadSession tableBatchReadSession =
                 new TableReadSessionBuilder().withSettings(environmentSettings)
                         .identifier(TableIdentifier.of("project", "TABLE1")).buildBatchReadSession();
@@ -117,6 +120,7 @@ class StorageReadTest {
 
     @Test
     void testVastTable() throws Exception {
+        odps.tables().delete("project", "TABLE2", true);
         odps.tables().newTableCreator("project", "TABLE2",
                 TableSchema.builder().withColumn(Column.newBuilder("id", TypeInfoFactory.BIGINT).primaryKey().build())
                         .withStringColumn("name").build()).ifNotExists().transactionTable().create();
@@ -147,6 +151,65 @@ class StorageReadTest {
         while (arrowReader.hasNext()) {
             VectorSchemaRoot vectorSchemaRoot = arrowReader.get();
             System.out.println(vectorSchemaRoot.getRowCount());
+        }
+        arrowReader.close();
+    }
+
+    @Test
+    void testReadPartitionedTable() throws OdpsException, IOException {
+        odps.tables().delete("project", "partitionTable", true);
+        TableSchema schema =
+                TableSchema.builder().withColumn(Column.newBuilder("id", TypeInfoFactory.BIGINT).primaryKey().build())
+                        .withStringColumn("name")
+                        .withPartitionColumn(new Column("pt", TypeInfoFactory.STRING)).build();
+        odps.tables().newTableCreator("project", "partitionTable", schema).transactionTable().ifNotExists().create();
+
+        Table table = odps.tables().get("project", "partitionTable");
+        TableSchema tableSchema = table.getSchema();
+        System.out.println(tableSchema);
+
+        TableTunnel.UpsertSession session =
+                odps.tableTunnel().buildUpsertSession("project", "partitionTable").setPartitionSpec("pt=pt1").build();
+        UpsertStream stream = session.buildUpsertStream().setCompressOption(new CompressOption(
+                CompressOption.CompressAlgorithm.ODPS_RAW, 0, 0)).build();
+
+        Record record = session.newRecord();
+        for (long i = 0; i < 10000; i++) {
+            record.set(0, i);
+            record.set(1, "name" + i);
+            stream.upsert(record);
+        }
+        stream.close();
+        session.commit(false);
+
+        TableTunnel.UpsertSession session2 =
+                odps.tableTunnel().buildUpsertSession("project", "partitionTable").setPartitionSpec("pt=pt2").build();
+        UpsertStream stream2 = session2.buildUpsertStream().setCompressOption(new CompressOption(
+                CompressOption.CompressAlgorithm.ODPS_RAW, 0, 0)).build();
+
+        Record record2 = session2.newRecord();
+        for (long i = 0; i < 100; i++) {
+            record2.set(0, i);
+            record2.set(1, "name" + i);
+            stream2.upsert(record2);
+        }
+        stream2.close();
+        session2.commit(false);
+
+        TableBatchReadSession tableBatchReadSession =
+                new TableReadSessionBuilder().withSettings(environmentSettings)
+                        .identifier(TableIdentifier.of("project", "partitionTable"))
+                        .requiredPartitions(ImmutableList.of(new PartitionSpec("pt=pt2"))).buildBatchReadSession();
+        InputSplitAssigner inputSplitAssigner = tableBatchReadSession.getInputSplitAssigner();
+        InputSplit split = inputSplitAssigner.getAllSplits()[0];
+        System.out.println(split);
+
+        SplitReader<VectorSchemaRoot> arrowReader =
+                tableBatchReadSession.createArrowReader(split,
+                        ReaderOptions.newBuilder().withSettings(environmentSettings).build());
+        while (arrowReader.hasNext()) {
+            VectorSchemaRoot vectorSchemaRoot = arrowReader.get();
+            Assertions.assertEquals(100, vectorSchemaRoot.getRowCount());
         }
         arrowReader.close();
     }

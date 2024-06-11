@@ -59,7 +59,8 @@ public class PlanSplitRequest {
                 extractJsonArrayAsStringList(request.getAsJsonArray("RequiredPartitionColumns"));
 
         // Extract "RequiredPartitions"
-        requiredPartitions = extractJsonArrayAsStringList(request.getAsJsonArray("RequiredPartitions"));
+        requiredPartitions = extractJsonArrayAsStringList(request.getAsJsonArray("RequiredPartitions")).stream()
+                .map(String::toUpperCase).toList();
 
         // Extract "RequiredBucketIds"
         requiredBucketIds = extractJsonArrayAsIntegerList(request.getAsJsonArray("RequiredBucketIds"));

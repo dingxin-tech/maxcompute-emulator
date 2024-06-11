@@ -42,11 +42,12 @@ import java.util.List;
  */
 @Service
 public class TableService {
-    public String reloadTable(String tableName) {
+    public String reloadTable(String tableName) throws SQLException {
         JsonObject table = new JsonObject();
         table.add("lastDDLTime", new JsonPrimitive(System.currentTimeMillis() / 1000));
 
         JsonArray columns = new JsonArray();
+        JsonArray partitionKeys = new JsonArray();
         JsonArray primaryKey = new JsonArray();
 
         List<SqlLiteColumn> schema = getDataSchema(tableName);
@@ -57,7 +58,14 @@ public class TableService {
                 primaryKey.add(new JsonPrimitive(column.getName()));
             }
         }
+
+        List<SqlLiteColumn> prtitionSchema = getPartitionSchema(tableName);
+        for (SqlLiteColumn column : prtitionSchema) {
+            partitionKeys.add(toJson(column.getName(), TypeConvertUtils.convertToMaxComputeType(column.getType()),
+                    column.isNotNull(), column.getDefaultValue()));
+        }
         table.add("columns", columns);
+        table.add("partitionKeys", partitionKeys);
 
         // reverse info
         JsonObject reverseInfo = new JsonObject();
@@ -85,7 +93,7 @@ public class TableService {
         }
     }
 
-    public List<SqlLiteColumn> getDataSchema(String tableName) {
+    public List<SqlLiteColumn> getDataSchema(String tableName) throws SQLException {
         if (StringUtils.isNotEmpty(tableName)) {
             return SqlRunner.getDataSchema(tableName);
         } else {

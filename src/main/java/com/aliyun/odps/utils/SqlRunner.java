@@ -32,6 +32,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -54,8 +55,6 @@ public class SqlRunner {
             return handleRenameColumn(originSql);
         } else if (originSql.toUpperCase().contains("DROP TABLE")) {
             return handleDropTable(originSql);
-        } else if (originSql.toUpperCase().contains("PARTITION")) {
-            return "Ignored";
         }
         return executeSql(originSql);
     }
@@ -231,13 +230,8 @@ public class SqlRunner {
         }
     }
 
-    public static List<SqlLiteColumn> getDataSchema(String tableName) {
-        try {
-            return getSchema(tableName).getColumns();
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-        return null;
+    public static List<SqlLiteColumn> getDataSchema(String tableName) throws SQLException {
+        return getSchema(tableName).getColumns();
     }
 
     private static String processResultSet(ResultSet resultSet) throws SQLException, IOException {

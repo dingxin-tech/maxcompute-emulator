@@ -21,6 +21,8 @@ package com.aliyun.odps.entity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.util.List;
+
 /**
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
  */
@@ -30,10 +32,19 @@ public class TableId {
     private String tableName;
     private String partitionName;
 
+    private List<String> partitionNames;
+
     public static TableId of(String tableName, String partitionName) {
         TableId tableId = new TableId();
         tableId.tableName = tableName;
         tableId.partitionName = partitionName;
+        return tableId;
+    }
+
+    public static TableId of(String tableName, List<String> partitionNames) {
+        TableId tableId = new TableId();
+        tableId.tableName = tableName;
+        tableId.partitionNames = partitionNames;
         return tableId;
     }
 }

@@ -42,6 +42,14 @@ public class CommonUtils {
 
     private static final String URL = "jdbc:sqlite:/tmp/maxcompute-emulator.db";
 
+    public static void initEmulator() {
+        try {
+            SqlRunner.executeSql("CREATE TABLE IF NOT EXISTS schemas(table_name TEXT, schema TEXT);");
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     public static Connection getConnection() throws SQLException {
         return DriverManager.getConnection(URL);
     }

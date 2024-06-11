@@ -100,7 +100,7 @@ public class CreateTable {
         @Override
         public void enterPartitionColumnDef(MaxComputeSQLParser.PartitionColumnDefContext ctx) {
             String columnId = ctx.quotedIdentifier().IDENTIFIER().getText().toUpperCase();
-            String columnType = ctx.dataType().getText();
+            String columnType = TypeConvertUtils.convertToSqlLiteType(ctx.dataType().getText());
             partitionColumns.add(new SqlLiteColumn(columnId, columnType, ctx.notNull() != null, null, false, true));
         }
 

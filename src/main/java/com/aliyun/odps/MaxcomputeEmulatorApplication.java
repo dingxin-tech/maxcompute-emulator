@@ -18,17 +18,15 @@
 
 package com.aliyun.odps;
 
-import com.aliyun.odps.utils.SqlRunner;
+import com.aliyun.odps.utils.CommonUtils;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-
-import java.sql.SQLException;
 
 @SpringBootApplication
 public class MaxcomputeEmulatorApplication {
 
-    public static void main(String[] args) throws SQLException {
-        SqlRunner.executeSql("CREATE TABLE IF NOT EXISTS schemas(table_name TEXT, schema TEXT);");
+    public static void main(String[] args) {
+        CommonUtils.initEmulator();
         SpringApplication.run(MaxcomputeEmulatorApplication.class, args);
     }
 

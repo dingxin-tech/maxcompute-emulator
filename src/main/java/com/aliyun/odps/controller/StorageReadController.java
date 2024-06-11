@@ -20,7 +20,9 @@ package com.aliyun.odps.controller;
 
 import com.aliyun.odps.entity.PlanSplitRequest;
 import com.aliyun.odps.entity.PlanSplitResponse;
+import com.aliyun.odps.entity.TableId;
 import com.aliyun.odps.service.StorageService;
+import com.aliyun.odps.utils.CommonUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,6 +32,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
@@ -58,11 +63,11 @@ public class StorageReadController {
                                                            @PathVariable("schema") String schema,
                                                            @PathVariable("table") String table,
                                                            @RequestParam("session_id") String sessionId,
-                                                           @RequestParam(value = "max_batch_rows", required = false) Long maxBatchRows,
-                                                           @RequestParam(value = "split_index", required = false) Integer splitIndex) {
+                                                           @RequestParam(value = "max_batch_rows", required = false)
+                                                           Long maxBatchRows,
+                                                           @RequestParam(value = "split_index", required = false)
+                                                           Integer splitIndex) {
         StreamingResponseBody responseBody = outputStream -> {
-            // Setup Arrow objects. Example here assumes a custom method to create these.
-            // This should be your actual logic to generate VectorSchemaRoot.
             try {
                 storageService.readTable(table, sessionId, maxBatchRows, splitIndex, outputStream);
             } catch (Exception e) {
