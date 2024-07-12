@@ -18,7 +18,12 @@
 
 package com.aliyun.odps.controller;
 
+import com.aliyun.odps.Column;
+import com.aliyun.odps.OdpsType;
+import com.aliyun.odps.TableSchema;
 import com.aliyun.odps.common.Options;
+import com.aliyun.odps.commons.proto.ProtobufRecordStreamReader;
+import com.aliyun.odps.data.Record;
 import com.aliyun.odps.entity.ErrorMessage;
 import com.aliyun.odps.entity.RowData;
 import com.aliyun.odps.entity.SqlLiteColumn;
@@ -26,8 +31,10 @@ import com.aliyun.odps.entity.TableId;
 import com.aliyun.odps.function.Table;
 import com.aliyun.odps.function.UpsertTable;
 import com.aliyun.odps.service.TableService;
+import com.aliyun.odps.tunnel.TunnelConstants;
+import com.aliyun.odps.tunnel.io.CompressOption;
+import com.aliyun.odps.type.TypeInfoFactory;
 import com.aliyun.odps.utils.CommonUtils;
-import com.aliyun.odps.utils.Deserializer;
 import com.aliyun.odps.utils.TypeConvertUtils;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -50,6 +57,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -243,11 +251,57 @@ public class TunnelController {
         if (!upsertSessionMap.containsKey(sessionId)) {
             return new ResponseEntity("session has been committed", HttpStatus.NOT_FOUND);
         }
+        CompressOption compressOption;
+        switch (compression) {
+            case "": {
+                compressOption = new CompressOption(CompressOption.CompressAlgorithm.ODPS_RAW, 0, 0);
+                break;
+            }
+            case "deflate": {
+                compressOption = new CompressOption();
+                break;
+            }
+            case "x-snappy-framed": {
+                compressOption = new CompressOption(CompressOption.CompressAlgorithm.ODPS_SNAPPY, 0, 0);
+                break;
+            }
+            case "x-lz4-frame": {
+                compressOption = new CompressOption(CompressOption.CompressAlgorithm.ODPS_LZ4_FRAME, 0, 0);
+                break;
+            }
+            default: {
+                throw new IOException("invalid compression option.");
+            }
+        }
+
         try {
-            List<RowData> records = Deserializer.deserializeData(new ByteArrayInputStream(requestBody),
-                    tableService.getDataSchema(tableId.toUpperCase()).stream()
-                            .map(c -> TypeConvertUtils.convertToMaxComputeType(c.getType()))
-                            .collect(Collectors.toList()));
+            List<Column> columns = tableService.getDataSchema(tableId.toUpperCase()).stream()
+                    .map(c -> new Column(c.getName(), TypeConvertUtils.convertToMaxComputeType(c.getType())))
+                    .collect(Collectors.toList());
+            TableSchema schema = TableSchema.builder().withColumns(columns).build();
+            int dataRowCount = columns.size();
+            convertToUpsertSchema(schema);
+
+            ProtobufRecordStreamReader reader =
+                    new ProtobufRecordStreamReader(schema, new ByteArrayInputStream(requestBody), compressOption);
+
+            List<RowData> records = new ArrayList<>();
+            Record upsertRecord = reader.read();
+            while (upsertRecord != null) {
+                Object[] data = new Object[dataRowCount];
+                for (int i = 0; i < dataRowCount; i++) {
+                    Object object = upsertRecord.get(i);
+                    if (object != null && object instanceof byte[]) {
+                        object = new String((byte[]) object);
+                    }
+                    data[i] = object;
+                }
+                records.add(new RowData(data,
+                        ((byte) upsertRecord.get(TunnelConstants.META_FIELD_OPERATION)) == 'U' ?
+                                RowData.RowKind.UPSERT :
+                                RowData.RowKind.DELETE));
+                upsertRecord = reader.read();
+            }
             UpsertTable.upsertData(tableId, records, Table.of(tableId.toUpperCase()).getSchema(), partition);
             HttpHeaders headers = new HttpHeaders();
             headers.set("x-odps-request-id", sessionId);
@@ -257,6 +311,23 @@ public class TunnelController {
             return new ResponseEntity(ErrorMessage.of(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
+
+    private void convertToUpsertSchema(TableSchema schema) {
+        schema.addColumn(
+                new Column(
+                        TunnelConstants.META_FIELD_VERSION, TypeInfoFactory.getPrimitiveTypeInfo(OdpsType.BIGINT)));
+        schema.addColumn(
+                new Column(TunnelConstants.META_FIELD_APP_VERSION,
+                        TypeInfoFactory.getPrimitiveTypeInfo(OdpsType.BIGINT)));
+        schema.addColumn(
+                new Column(TunnelConstants.META_FIELD_OPERATION,
+                        TypeInfoFactory.getPrimitiveTypeInfo(OdpsType.TINYINT)));
+        schema.addColumn(new Column(TunnelConstants.META_FIELD_KEY_COLS, TypeInfoFactory
+                .getArrayTypeInfo(TypeInfoFactory.getPrimitiveTypeInfo(OdpsType.BIGINT))));
+        schema.addColumn(new Column(TunnelConstants.META_FIELD_VALUE_COLS, TypeInfoFactory
+                .getArrayTypeInfo(TypeInfoFactory.getPrimitiveTypeInfo(OdpsType.BIGINT))));
+    }
+
     @GetMapping("/projects/{projectName}/tunnel")
     @ResponseBody
     public String getTunnelEndpoint() {

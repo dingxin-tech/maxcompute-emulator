@@ -47,7 +47,7 @@ public class UpsertTest {
         TableTunnel.UpsertSession session = odps.tableTunnel().buildUpsertSession("project", "students").build();
 
         UpsertStream stream = session.buildUpsertStream().setCompressOption(new CompressOption(
-                CompressOption.CompressAlgorithm.ODPS_RAW, 1, 0)).build();
+                CompressOption.CompressAlgorithm.ODPS_ZLIB, 1, 0)).build();
         Record record = session.newRecord();
         record.set(0, 2L);
         record.set(1, "Jack");
