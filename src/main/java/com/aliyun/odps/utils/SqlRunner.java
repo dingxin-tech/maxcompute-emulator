@@ -32,7 +32,6 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -222,7 +221,7 @@ public class SqlRunner {
         throw new SQLException("Table schema " + tableName + " not found");
     }
 
-    private static void updateSchema(String tableName, SqlLiteSchema schema) throws SQLException {
+    static void updateSchema(String tableName, SqlLiteSchema schema) throws SQLException {
         try (Statement stmt = CommonUtils.getConnection().createStatement()) {
             stmt.executeUpdate(
                     "UPDATE schemas SET schema = '" + schema.toJson() + "' WHERE table_name = '" + tableName +
