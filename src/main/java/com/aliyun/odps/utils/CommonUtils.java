@@ -40,7 +40,7 @@ public class CommonUtils {
         return java.util.UUID.randomUUID().toString().replace("-", "");
     }
 
-    private static final String URL = "jdbc:sqlite:/tmp/maxcompute-emulator.db";
+    private static final String URL = "jdbc:sqlite:TPC-H-small.db";
 
     public static void initEmulator() {
         try {
