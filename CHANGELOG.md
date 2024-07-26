@@ -1,3 +1,11 @@
+## v0.0.5
+#### 新功能
+- 新增支持 MaxStorage 读取 MaxCompute 分区表（预览版，该功能未经过完整验证）
+- 现在 tunnel upsert 功能支持任意指定 compress option 了（原只能指定 raw）
+
+## v0.0.5-tpch
+该版本在 v0.0.5 版本的基础上，内置了 TPCH-mini 数据集。这个数据集是从完整 TPCH 数据集取样的，取样比例为 0.01。
+
 ## v0.0.4
 这是一个修复版本，我们在使用 MaxStorage（Storage API）读取 MaxCompute 非分区表时遇到了一些问题（分区表目前还不支持）。
 我们修复了这些问题，并确保了模拟能够支持目前版本的 [Presto-Connector](https://github.com/prestodb/presto-alibaba-maxcompute-connector/pull/4)
