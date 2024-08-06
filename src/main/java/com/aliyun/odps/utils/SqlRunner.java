@@ -212,10 +212,17 @@ public class SqlRunner {
 
     public static SqlLiteSchema getSchema(String tableName) throws SQLException {
         try (Statement stmt = CommonUtils.getConnection().createStatement()) {
-            ResultSet rs = stmt.executeQuery("SELECT schema FROM schemas WHERE table_name = '" + tableName.toUpperCase() + "';");
+            ResultSet rs = stmt.executeQuery(
+                    "SELECT schema FROM schemas WHERE table_name = '" + tableName.toUpperCase() + "';");
             if (rs.next()) {
                 String schema = rs.getString("schema");
                 return SqlLiteSchema.fromJson(schema);
+            } else {
+                rs = stmt.executeQuery("SELECT schema FROM schemas WHERE table_name = '" + tableName + "';");
+                if (rs.next()) {
+                    String schema = rs.getString("schema");
+                    return SqlLiteSchema.fromJson(schema);
+                }
             }
         }
         throw new SQLException("Table schema " + tableName + " not found");

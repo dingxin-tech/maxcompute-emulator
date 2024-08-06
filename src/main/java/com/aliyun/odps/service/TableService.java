@@ -84,7 +84,14 @@ public class TableService {
                 pstmt.setString(1, tableName.toUpperCase());
 
                 try (ResultSet resultSet = pstmt.executeQuery()) {
-                    return resultSet.next();
+                    if (resultSet.next()) {
+                        return true;
+                    } else {
+                        pstmt.setString(1, tableName);
+                        try (ResultSet resultSet2 = pstmt.executeQuery()) {
+                            return resultSet2.next();
+                        }
+                    }
                 }
             }
         } catch (SQLException e) {

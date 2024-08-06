@@ -40,7 +40,7 @@ public class CommonUtils {
         return java.util.UUID.randomUUID().toString().replace("-", "");
     }
 
-    private static final String URL = "jdbc:sqlite:TPC-H-small.db";
+    private static final String URL = "jdbc:sqlite:tpch-tiny.db";
 
     public static void initEmulator() {
         try {

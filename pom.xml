@@ -28,7 +28,7 @@
     </parent>
     <groupId>com.aliyun.odps</groupId>
     <artifactId>maxcompute-emulator</artifactId>
-    <version>0.0.5-tpch</version>
+    <version>0.0.6-tpch</version>
     <name>maxcompute-emulator</name>
     <description>mock version to access MaxCompute</description>
     <properties>
@@ -115,7 +115,7 @@
         <dependency>
             <groupId>tech.dingxin</groupId>
             <artifactId>arrow-utils</artifactId>
-            <version>0.0.1</version>
+            <version>0.0.2</version>
         </dependency>
         <dependency>
             <groupId>org.apache.arrow</groupId>

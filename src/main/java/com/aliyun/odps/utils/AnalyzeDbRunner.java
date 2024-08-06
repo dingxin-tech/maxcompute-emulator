@@ -25,6 +25,7 @@ import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -36,12 +37,14 @@ import java.util.Map;
 public class AnalyzeDbRunner {
 
     public static void main(String[] args) {
-        String url = "jdbc:sqlite:/Users/dingxin/Downloads/TPC-H-small.db";
+        String url = "jdbc:sqlite:tpch.db";
+        CommonUtils.initEmulator();
         try (Connection conn = DriverManager.getConnection(url)) {
             if (conn != null) {
                 Map<String, SqlLiteSchema> schemas = getDatabaseSchema(conn);
                 schemas.forEach((tableName, schema) -> {
                     try {
+                        deleteRowIfFirstColumnEqualsColumnName(conn, tableName);
                         SqlRunner.executeSql("INSERT INTO schemas VALUES ('" + tableName + "', '" + schema.toJson() +
                                 "');");
                     } catch (SQLException e) {
@@ -102,5 +105,21 @@ public class AnalyzeDbRunner {
         }
         rsPrimaryKeys.close();
         return false;
+    }
+
+    private static void deleteRowIfFirstColumnEqualsColumnName(Connection conn, String tableName) throws SQLException {
+        Statement stmt = conn.createStatement();
+        ResultSet rs = stmt.executeQuery("PRAGMA table_info(" + tableName + ")");
+
+        if (rs.next()) {
+            String firstColumnName = rs.getString("name");
+            String sql = "DELETE FROM " + tableName + " WHERE " + firstColumnName + " = '" + firstColumnName + "'";
+            stmt.executeUpdate(sql);
+            System.out.println("Deleted rows from table " + tableName + " where " + firstColumnName + " equals " +
+                    firstColumnName);
+        }
+
+        stmt.close();
+        rs.close();
     }
 }

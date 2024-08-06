@@ -21,6 +21,11 @@ package com.aliyun.odps.utils;
 import com.aliyun.odps.type.TypeInfo;
 import com.aliyun.odps.type.TypeInfoFactory;
 
+import java.sql.Types;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+
 /**
  * @author dingxin (zhangdingxin.zdx@alibaba-inc.com)
  */
@@ -57,7 +62,7 @@ public class TypeConvertUtils {
         if ("DOUBLE".equals(typeName) || "DOUBLE PRECISION".equals(typeName)) {
             return TypeInfoFactory.DOUBLE;
         }
-        if ("FLOAT".equals(typeName)) {
+        if ("FLOAT".equals(typeName) || "REAL".equals(typeName)) {
             return TypeInfoFactory.FLOAT;
         }
         if ("CHARACTER".equals(typeName) || "NCHAR".equals(typeName) || "NATIVE CHARACTER".equals(typeName) ||
@@ -87,12 +92,27 @@ public class TypeConvertUtils {
             return null;
         }
         return switch (columnType) {
-            case java.sql.Types.TINYINT -> ((Number) object).byteValue();
-            case java.sql.Types.SMALLINT -> ((Number) object).shortValue();
-            case java.sql.Types.INTEGER -> ((Number) object).intValue();
-            case java.sql.Types.BIGINT -> ((Number) object).longValue();
+            case Types.TINYINT -> ((Number) object).byteValue();
+            case Types.SMALLINT -> ((Number) object).shortValue();
+            case Types.INTEGER -> ((Number) object).intValue();
+            case Types.BIGINT -> ((Number) object).longValue();
+            case Types.FLOAT, Types.REAL -> ((Number) object).floatValue();
+            case Types.DOUBLE -> ((Number) object).doubleValue();
+            case Types.DATE -> convertStringToLocalDate((String) object);
             default -> object;
         };
+    }
+
+    private static DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static LocalDate convertStringToLocalDate(String dateString) {
+        if (dateString == null) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(dateString, DATE_FORMATTER);
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("Invalid date format, expected yyyy-MM-dd", e);
+        }
     }
 }
 
