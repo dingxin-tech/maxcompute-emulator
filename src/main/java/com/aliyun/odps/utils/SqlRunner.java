@@ -32,7 +32,6 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -213,16 +212,23 @@ public class SqlRunner {
 
     public static SqlLiteSchema getSchema(String tableName) throws SQLException {
         try (Statement stmt = CommonUtils.getConnection().createStatement()) {
-            ResultSet rs = stmt.executeQuery("SELECT schema FROM schemas WHERE table_name = '" + tableName.toUpperCase() + "';");
+            ResultSet rs = stmt.executeQuery(
+                    "SELECT schema FROM schemas WHERE table_name = '" + tableName.toUpperCase() + "';");
             if (rs.next()) {
                 String schema = rs.getString("schema");
                 return SqlLiteSchema.fromJson(schema);
+            } else {
+                rs = stmt.executeQuery("SELECT schema FROM schemas WHERE table_name = '" + tableName + "';");
+                if (rs.next()) {
+                    String schema = rs.getString("schema");
+                    return SqlLiteSchema.fromJson(schema);
+                }
             }
         }
         throw new SQLException("Table schema " + tableName + " not found");
     }
 
-    private static void updateSchema(String tableName, SqlLiteSchema schema) throws SQLException {
+    static void updateSchema(String tableName, SqlLiteSchema schema) throws SQLException {
         try (Statement stmt = CommonUtils.getConnection().createStatement()) {
             stmt.executeUpdate(
                     "UPDATE schemas SET schema = '" + schema.toJson() + "' WHERE table_name = '" + tableName +

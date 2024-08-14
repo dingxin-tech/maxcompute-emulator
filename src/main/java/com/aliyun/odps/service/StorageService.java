@@ -112,20 +112,23 @@ public class StorageService {
             sql.delete(sql.length() - 4, sql.length());
             sql.append(";");
         } else {
-            sql = new StringBuilder("select * from " + tableId.getTableName().toUpperCase() + " where ");
+            sql = new StringBuilder("select * from " + tableId.getTableName().toUpperCase());
             List<String> partitionNames = tableId.getPartitionNames();
-            for (String partitionName : partitionNames) {
-                sql.append("(");
-                PartitionSpec partitionSpec = new PartitionSpec(partitionName);
-                Set<String> keys = partitionSpec.keys();
-                for (String key : keys) {
-                    sql.append(key).append(" = '").append(partitionSpec.get(key)).append("' and ");
+            if (!partitionNames.isEmpty()) {
+                sql.append(" where ");
+                for (String partitionName : partitionNames) {
+                    sql.append("(");
+                    PartitionSpec partitionSpec = new PartitionSpec(partitionName);
+                    Set<String> keys = partitionSpec.keys();
+                    for (String key : keys) {
+                        sql.append(key).append(" = '").append(partitionSpec.get(key)).append("' and ");
+                    }
+                    sql.delete(sql.length() - 4, sql.length());
+
+                    sql.append(") or ");
                 }
                 sql.delete(sql.length() - 4, sql.length());
-
-                sql.append(") or ");
             }
-            sql.delete(sql.length() - 4, sql.length());
             sql.append(";");
         }
         try (
