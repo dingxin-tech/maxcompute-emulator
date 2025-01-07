@@ -99,6 +99,7 @@ public class SqlRunner {
         // split on whitespace to get column name
         String[] columnDefinitions = columnsPart.split("\\s*,\\s*");
         String tableName = noDatabasePrefix.replaceAll("ALTER TABLE (\\S+) ADD COLUMNS.*", "$1");
+        tableName = unwrapTable(tableName);
 
         String[] alterTableStatements = new String[columnDefinitions.length];
 
@@ -134,6 +135,7 @@ public class SqlRunner {
         String noDatabasePrefix = mcSql.replaceAll("ALTER TABLE \\S+\\.", "ALTER TABLE ");
 
         String tableName = noDatabasePrefix.replaceAll("ALTER TABLE (\\S+) DROP COLUMNS.*", "$1");
+        tableName = unwrapTable(tableName);
         String[] columnsToDrop =
                 noDatabasePrefix.replaceAll("ALTER TABLE \\S+ DROP COLUMNS ", "").split(",");
 
@@ -180,6 +182,7 @@ public class SqlRunner {
         String noDatabasePrefix = mcSql.replaceAll("ALTER TABLE \\S+\\.", "ALTER TABLE ");
 
         String tableName = noDatabasePrefix.replaceAll("ALTER TABLE (\\S+) CHANGE COLUMN.*", "$1");
+        tableName = unwrapTable(tableName);
         String[] columnToRename =
                 noDatabasePrefix.replaceAll("ALTER TABLE \\S+ CHANGE COLUMN ", "").replace("\\s+", "").split(" ");
         String oldName;
@@ -211,6 +214,7 @@ public class SqlRunner {
     }
 
     public static SqlLiteSchema getSchema(String tableName) throws SQLException {
+        tableName = unwrapTable(tableName);
         try (Statement stmt = CommonUtils.getConnection().createStatement()) {
             ResultSet rs = stmt.executeQuery(
                     "SELECT schema FROM schemas WHERE table_name = '" + tableName.toUpperCase() + "';");
@@ -229,6 +233,7 @@ public class SqlRunner {
     }
 
     static void updateSchema(String tableName, SqlLiteSchema schema) throws SQLException {
+        tableName = unwrapTable(tableName);
         try (Statement stmt = CommonUtils.getConnection().createStatement()) {
             stmt.executeUpdate(
                     "UPDATE schemas SET schema = '" + schema.toJson() + "' WHERE table_name = '" + tableName +
@@ -274,5 +279,14 @@ public class SqlRunner {
         csvWriter.close();
 
         return writer.toString();
+    }
+
+    private static String unwrapTable(String tableName) {
+        tableName = tableName.trim();
+        if (tableName.startsWith("`") && tableName.endsWith("`")) {
+            return tableName.substring(1, tableName.length() - 1);
+        } else {
+            return tableName;
+        }
     }
 }
