@@ -130,6 +130,7 @@ public class InstanceController {
         if (endTime.isAfter(Instant.now())) {
             return new ResponseEntity<>(marshal(new InstanceStatusModel("Running")), headers, HttpStatus.OK);
         } else {
+            instanceRunningMap.remove(instanceId);
             return new ResponseEntity<>(marshal(new InstanceStatusModel()), headers, HttpStatus.OK);
         }
     }
@@ -154,12 +155,14 @@ public class InstanceController {
         if (timeToStop > 0) {
             if (timeToStop < 5) {
                 TimeUnit.SECONDS.sleep(timeToStop);
+                instanceRunningMap.remove(instanceId);
                 return new ResponseEntity<>(marshal(new InstanceStatusModel()), headers, HttpStatus.OK);
             } else {
                 TimeUnit.SECONDS.sleep(5);
             }
             return new ResponseEntity<>(marshal(new InstanceStatusModel("Running")), headers, HttpStatus.OK);
         } else {
+            instanceRunningMap.remove(instanceId);
             return new ResponseEntity<>(marshal(new InstanceStatusModel()), headers, HttpStatus.OK);
         }
     }
