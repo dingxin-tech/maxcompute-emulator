@@ -49,11 +49,14 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
 import java.sql.SQLException;
+import java.sql.Time;
+import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.odps.rest.SimpleXmlUtils.marshal;
 
@@ -66,8 +69,13 @@ public class InstanceController {
 
     Map<String, Map<String, SQLResult>> instanceResultMap;
 
+    Map<String, Instant> instanceRunningMap;
+
+    private static final int DEFAULT_RUNNING_TIME = 60;
+
     public InstanceController() {
         instanceResultMap = new HashMap<>();
+        instanceRunningMap = new HashMap<>();
     }
 
     @PostMapping("/projects/{projectName}/instances")
@@ -89,9 +97,9 @@ public class InstanceController {
             // just return any result
             String result = "a, b \r\n c, d \r\n";
             //LOG.info("instance {} result {}", instanceId, result);
-
             instanceResultMap.putIfAbsent(instanceId, new HashMap<>());
             instanceResultMap.get(instanceId).put(name, new SQLResult(query, result));
+            instanceRunningMap.put(instanceId, Instant.now().plus(DEFAULT_RUNNING_TIME, TimeUnit.SECONDS.toChronoUnit()));
 
             HttpHeaders headers = new HttpHeaders();
             headers.setLocation(URI.create("/" + instanceId));
@@ -117,7 +125,42 @@ public class InstanceController {
         headers.set("x-odps-request-id", instanceId);
         headers.set("x-odps-owner", "MaxCompute Simulator");
 
-        return new ResponseEntity<>(marshal(new InstanceStatusModel()), headers, HttpStatus.OK);
+        Instant endTime = instanceRunningMap.get(instanceId);
+        if (endTime.isAfter(Instant.now())) {
+            return new ResponseEntity<>(marshal(new InstanceStatusModel("Running")), headers, HttpStatus.OK);
+        } else {
+            return new ResponseEntity<>(marshal(new InstanceStatusModel()), headers, HttpStatus.OK);
+        }
+    }
+
+    @GetMapping(value = "/projects/{projectName}/instances/{instanceId}", params = "instancestatus")
+    @ResponseBody
+    public  ResponseEntity<Object> checkInstanceStatusBlock(@PathVariable("projectName") String projectName,
+                                      @PathVariable("instanceId") String instanceId,
+                                      @RequestParam("curr_project") String currProject) throws Exception {
+        HttpHeaders headers = new HttpHeaders();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US)
+                .withZone(java.time.ZoneId.of("GMT"));
+
+        String dateString = formatter.format(ZonedDateTime.now());
+        headers.set("x-odps-start-time", dateString);
+        headers.set("x-odps-end-time", dateString);
+        headers.set("x-odps-request-id", instanceId);
+        headers.set("x-odps-owner", "MaxCompute Simulator");
+
+        Instant endTime = instanceRunningMap.get(instanceId);
+        long timeToStop = endTime.getEpochSecond() - Instant.now().getEpochSecond();
+        if (timeToStop > 0) {
+            if (timeToStop < 5) {
+                TimeUnit.SECONDS.sleep(timeToStop);
+                return new ResponseEntity<>(marshal(new InstanceStatusModel()), headers, HttpStatus.OK);
+            } else {
+                TimeUnit.SECONDS.sleep(5);
+            }
+            return new ResponseEntity<>(marshal(new InstanceStatusModel("Running")), headers, HttpStatus.OK);
+        } else {
+            return new ResponseEntity<>(marshal(new InstanceStatusModel()), headers, HttpStatus.OK);
+        }
     }
 
     @GetMapping(value = "/projects/{projectName}/instances/{instanceId}", params = "taskstatus")
@@ -126,9 +169,10 @@ public class InstanceController {
                                       @PathVariable("instanceId") String instanceId,
                                       @RequestParam("curr_project") String currProject) {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-                "<Instance><Status>Terminated</Status><Tasks><Task Type=\"SQL\"><Name>sqlrt_fallback_task</Name><StartTime>Sat, " +
-                "11 May 2024 02:08:18 GMT</StartTime><EndTime>Sat, 11 May 2024 02:08:29 GMT</EndTime><Status>Success</Status><Histories/></Task></Tasks></Instance>";
+                    "<Instance><Status>Terminated</Status><Tasks><Task Type=\"SQL\"><Name>sqlrt_fallback_task</Name><StartTime>Sat, " +
+                    "11 May 2024 02:08:18 GMT</StartTime><EndTime>Sat, 11 May 2024 02:08:29 GMT</EndTime><Status>Success</Status><Histories/></Task></Tasks></Instance>";
     }
+
 
     @GetMapping(value = "/projects/{projectName}/instances/{instanceId}", params = "source")
     @ResponseBody
