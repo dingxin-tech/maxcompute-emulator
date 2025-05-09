@@ -56,6 +56,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import static com.aliyun.odps.rest.SimpleXmlUtils.marshal;
@@ -74,8 +75,8 @@ public class InstanceController {
     private static final int DEFAULT_RUNNING_TIME = 60;
 
     public InstanceController() {
-        instanceResultMap = new HashMap<>();
-        instanceRunningMap = new HashMap<>();
+        instanceResultMap = new ConcurrentHashMap<>();
+        instanceRunningMap = new ConcurrentHashMap<>();
     }
 
     @PostMapping("/projects/{projectName}/instances")
