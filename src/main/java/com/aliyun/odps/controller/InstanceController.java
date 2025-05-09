@@ -126,7 +126,7 @@ public class InstanceController {
         headers.set("x-odps-request-id", instanceId);
         headers.set("x-odps-owner", "MaxCompute Simulator");
 
-        Instant endTime = instanceRunningMap.get(instanceId);
+        Instant endTime = instanceRunningMap.getOrDefault(instanceId, Instant.now().plus(DEFAULT_RUNNING_TIME, TimeUnit.SECONDS.toChronoUnit()));
         if (endTime.isAfter(Instant.now())) {
             return new ResponseEntity<>(marshal(new InstanceStatusModel("Running")), headers, HttpStatus.OK);
         } else {
@@ -150,7 +150,7 @@ public class InstanceController {
         headers.set("x-odps-request-id", instanceId);
         headers.set("x-odps-owner", "MaxCompute Simulator");
 
-        Instant endTime = instanceRunningMap.get(instanceId);
+        Instant endTime = instanceRunningMap.getOrDefault(instanceId, Instant.now().plus(DEFAULT_RUNNING_TIME, TimeUnit.SECONDS.toChronoUnit()));
         long timeToStop = endTime.getEpochSecond() - Instant.now().getEpochSecond();
         if (timeToStop > 0) {
             if (timeToStop < 5) {
@@ -212,6 +212,11 @@ public class InstanceController {
     @PostMapping("/projects/{projectName}/authorization")
     public String generateLogView() throws Exception {
         return marshal(new AuthorizationQueryResponse());
+    }
+
+    @GetMapping("/logview/host")
+    public String getLogviewHost() throws Exception {
+        return "127.0.0.1";
     }
 
     @Root(name = "Authorization", strict = false)
