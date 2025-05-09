@@ -33,7 +33,6 @@ import com.aliyun.odps.simpleframework.xml.Root;
 import com.aliyun.odps.simpleframework.xml.convert.Convert;
 import com.aliyun.odps.task.SQLTask;
 import com.aliyun.odps.utils.CommonUtils;
-import com.aliyun.odps.utils.SqlRunner;
 import com.aliyun.odps.utils.XmlUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,10 +84,11 @@ public class InstanceController {
             String query = sql.getQuery().toUpperCase().trim();
             query = query.replaceAll("\\s+", " ");
             String instanceId = CommonUtils.generateUUID();
-            LOG.info("create instance {} to execute query {}", instanceId, query);
+            //LOG.info("create instance {} to execute query {}", instanceId, query);
 
-            String result = SqlRunner.execute(query);
-            LOG.info("instance {} result {}", instanceId, result);
+            // just return any result
+            String result = "a, b \r\n c, d \r\n";
+            //LOG.info("instance {} result {}", instanceId, result);
 
             instanceResultMap.putIfAbsent(instanceId, new HashMap<>());
             instanceResultMap.get(instanceId).put(name, new SQLResult(query, result));
@@ -126,7 +126,7 @@ public class InstanceController {
                                       @PathVariable("instanceId") String instanceId,
                                       @RequestParam("curr_project") String currProject) {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-                "<Instance><Status>Terminated</Status><Tasks><Task Type=\"SQL\"><Name>AnonymousSQLTask</Name><StartTime>Sat, " +
+                "<Instance><Status>Terminated</Status><Tasks><Task Type=\"SQL\"><Name>sqlrt_fallback_task</Name><StartTime>Sat, " +
                 "11 May 2024 02:08:18 GMT</StartTime><EndTime>Sat, 11 May 2024 02:08:29 GMT</EndTime><Status>Success</Status><Histories/></Task></Tasks></Instance>";
     }
 
