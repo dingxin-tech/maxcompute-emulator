@@ -1,3 +1,12 @@
+## 2.0.0-ck.1（v2 分支，2026-09-14）
+
+- Go/DuckDB 重写首版，新增 CK 当前 Tunnel 下载全链路、Protobuf/Arrow CRC32C 与压缩。
+- Java SDK SQL 造数、元数据、静态分区、事务覆盖和会话快照；支持公开 ODPS grammar 验证。
+- Linux amd64 Docker 与 Java SDK/Testcontainers 回归。
+- 与 v1 数据文件不兼容；Upsert/Storage v1 尚未迁移，Storage v2 留待后续；本版不替换 master。
+
+以下为 v1 历史：
+
 ## v0.0.5
 #### 新功能
 - 新增支持 MaxStorage 读取 MaxCompute 分区表（预览版，该功能未经过完整验证）

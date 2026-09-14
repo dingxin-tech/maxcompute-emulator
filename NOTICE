@@ -1,0 +1,15 @@
+MaxCompute Emulator v2
+Licensed under the Apache License, Version 2.0.
+
+ODPS grammar files are from the public aliyun/aliyun-odps-java-sdk,
+commit 1c11317c18ad63ac84030867f5a8dd2def48122f (Apache-2.0).
+Original copyright notices are retained in grammar/upstream.
+Generated ANTLR files use the public grammar with documented Go-target adaptations.
+See grammar/README.md.
+
+Dependencies and licenses:
+DuckDB and duckdb-go: MIT.
+Apache Arrow Go: Apache-2.0.
+ANTLR Go runtime: BSD-3-Clause.
+klauspost/compress: BSD-3-Clause; pierrec/lz4: BSD-3-Clause.
+Exact transitive dependencies are recorded in go.mod/go.sum.

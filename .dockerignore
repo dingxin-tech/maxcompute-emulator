@@ -1,0 +1,8 @@
+.git
+tests
+docs/*
+!docs/third-party-licenses.txt
+grammar
+scripts
+*.tar
+*.tar.gz
