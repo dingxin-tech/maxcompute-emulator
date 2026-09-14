@@ -24,3 +24,7 @@ shasum -a 256 maxcompute-emulator-1.0.0-rc.1-linux-amd64.tar.gz
 ```
 
 交付使用 prebuilt 路径，编译后的 ELF 在 Linux amd64 容器内执行并接受 Java SDK 验收。Dockerfile 的常规 release 路径供 Linux/CI 直接源码构建，发布方应在自己的 CI 重跑。不包含镜像 registry 推送步骤。
+
+## 依赖下载缓存
+
+源码 Docker 构建支持 `--build-arg GOPROXY=<可访问的 Go module proxy>`，默认仍为 `https://proxy.golang.org,direct`。依赖版本与完整性由 go.mod/go.sum 固定。首次下载 DuckDB 平台库较大；可使用可信的本地缓存代理，构建结果仍需执行 SDK 容器测试。

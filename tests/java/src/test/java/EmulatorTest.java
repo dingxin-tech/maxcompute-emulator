@@ -77,6 +77,26 @@ public class EmulatorTest {
   }
 
   @Test
+  void sdkTableCreateDeleteAndIdentity() throws Exception {
+    String t = table();
+    TableSchema schema = new TableSchema();
+    schema.addColumn(new Column("id", OdpsType.BIGINT));
+    odps.tables().create("test_project", t, schema, "SDK table", false);
+    assertTrue(odps.tables().exists(t));
+    Table meta = odps.tables().get(t);
+    meta.reload();
+    assertEquals("SDK table", meta.getComment());
+    String oldId = meta.getTableID();
+    assertNotNull(oldId);
+    assertFalse(oldId.isEmpty());
+    odps.tables().delete(t);
+    assertFalse(odps.tables().exists(t));
+    odps.tables().create(t, schema);
+    assertNotEquals(oldId, odps.tables().get(t).getTableID());
+    odps.tables().delete(t);
+  }
+
+  @Test
   void partitionMetadataLifecycle() throws Exception {
     String t = table();
     sql("create table " + t + "(id bigint, name string) partitioned by(ds string, region string)");

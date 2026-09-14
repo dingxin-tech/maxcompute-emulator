@@ -18,6 +18,7 @@ COPY build/emulator-linux-amd64 /usr/local/bin/emulator
 
 FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
+ARG GOPROXY=https://proxy.golang.org,direct
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
