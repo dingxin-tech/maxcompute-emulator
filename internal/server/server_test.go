@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -157,8 +158,17 @@ func TestArrowCompressionChunkCRCAndRawLimit(t *testing.T) {
 	}
 	unchunk(t, small)
 	code, _, b := request(t, h, "GET", path, "deflate")
-	if code != 400 || !bytes.Contains(b, []byte("InvalidCompression")) {
-		t.Fatalf("%d %s", code, b)
+	if code != 200 {
+		t.Fatalf("deflate status %d", code)
+	}
+	zr, err := zlib.NewReader(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	got, err := io.ReadAll(zr)
+	if err != nil || !bytes.Equal(got, raw) {
+		t.Fatal("deflate payload mismatch", err)
 	}
 }
 func TestSessionBindingErrorsAndCompletion(t *testing.T) {

@@ -22,6 +22,7 @@ type Column struct {
 	Parsed   Type   `json:"-"`
 }
 type Table struct {
+	PrimaryKeys         []string
 	Name                string
 	Columns, Partitions []Column
 }
@@ -164,6 +165,26 @@ func (t Type) Arrow() arrow.DataType {
 		return arrow.StructOf(f...)
 	}
 	panic("invalid canonical type")
+}
+
+// StorageArrow uses UTF-8 strings; Tunnel uses binary buffers for STRING.
+func (t Type) StorageArrow() arrow.DataType {
+	switch t.Name {
+	case "string":
+		return arrow.BinaryTypes.String
+	case "array":
+		return arrow.ListOf(t.Children[0].StorageArrow())
+	case "map":
+		return arrow.MapOf(t.Children[0].StorageArrow(), t.Children[1].StorageArrow())
+	case "struct":
+		fields := []arrow.Field{}
+		for i, c := range t.Children {
+			fields = append(fields, arrow.Field{Name: t.Fields[i], Type: c.StorageArrow(), Nullable: true})
+		}
+		return arrow.StructOf(fields...)
+	default:
+		return t.Arrow()
+	}
 }
 func Quote(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 func NewColumn(name, typ string) (Column, error) {

@@ -12,6 +12,7 @@
     <docker.api.version>1.44</docker.api.version>
   </properties>
   <dependencies>
+    <dependency><groupId>com.aliyun.odps</groupId><artifactId>odps-sdk-storage-api</artifactId><version>0.61.2-public</version></dependency>
     <dependency>
       <groupId>com.aliyun.odps</groupId><artifactId>odps-sdk-core</artifactId><version>0.61.2-public</version>
     </dependency>

@@ -21,11 +21,12 @@ import (
 
 	"github.com/dingxin-tech/maxcompute-emulator/internal/engine"
 	"github.com/dingxin-tech/maxcompute-emulator/internal/wire"
+	"github.com/golang/snappy"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4/v4"
 )
 
-const Version = "2.0.0-ck.1"
+const Version = "2.1.0"
 
 type Config struct {
 	SessionTTL     time.Duration
@@ -40,6 +41,7 @@ type session struct {
 	Created                                      time.Time
 }
 type instance struct {
+	Data                                             engine.Result
 	Project, Schema, ID, Name, Query, Status, Output string
 	Created                                          time.Time
 }
@@ -49,6 +51,8 @@ type Server struct {
 	mu        sync.Mutex
 	sessions  map[string]*session
 	instances map[string]*instance
+	writes    map[string]*writeSession
+	storage   map[string]*storageSession
 	inflight  chan struct{}
 }
 
@@ -62,7 +66,7 @@ func New(e *engine.Engine, c Config) *Server {
 	if c.QueryTimeout == 0 {
 		c.QueryTimeout = 30 * time.Second
 	}
-	return &Server{Engine: e, cfg: c, sessions: map[string]*session{}, instances: map[string]*instance{}, inflight: make(chan struct{}, 16)}
+	return &Server{Engine: e, cfg: c, sessions: map[string]*session{}, instances: map[string]*instance{}, writes: map[string]*writeSession{}, storage: map[string]*storageSession{}, inflight: make(chan struct{}, 16)}
 }
 func id() string {
 	var b [16]byte
@@ -86,7 +90,7 @@ func fail(w http.ResponseWriter, r *http.Request, status int, code string, e err
 	if len(message) > 600 {
 		message = message[:600]
 	}
-	if r.URL.Query().Has("downloads") || r.URL.Query().Has("downloadid") || strings.Contains(r.URL.Path, "storage") {
+	if r.URL.Query().Has("downloads") || r.URL.Query().Has("downloadid") || r.URL.Query().Has("uploads") || r.URL.Query().Has("uploadid") || strings.Contains(r.URL.Path, "/upserts") || strings.Contains(r.URL.Path, "/streams") || strings.Contains(r.URL.Path, "storage") {
 		jsonResponse(w, status, map[string]string{"Code": code, "Message": message, "RequestId": w.Header().Get("x-odps-request-id")})
 	} else {
 		w.Header().Set("Content-Type", "application/xml")
@@ -118,7 +122,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.QueryTimeout)
 	defer cancel()
 	r = r.WithContext(ctx)
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, wire.MaxPayload)
 	path := strings.Trim(r.URL.Path, "/")
 	if strings.HasPrefix(path, "api/") {
 		path = strings.TrimPrefix(path, "api/")
@@ -142,8 +146,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 200, map[string]string{"status": "ready", "version": Version})
 		return
 	}
+	if path == "storage/v2" || path == "storage/v3" {
+		s.storageAPI(w, r)
+		return
+	}
 	if path == "capabilities" {
-		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": false, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; ODPS2 subset", "auth": "test-only; signatures not validated"})
+		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; ODPS2 subset", "auth": "test-only; signatures not validated"})
 		return
 	}
 	parts := strings.Split(path, "/")
@@ -185,6 +193,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(rest) >= 1 && rest[0] == "tables" {
+		if len(rest) == 3 && (rest[2] == "streams" || rest[2] == "upserts") {
+			kind := "stream"
+			if rest[2] == "upserts" {
+				kind = "upsert"
+			}
+			s.upload(w, r, project, schema, rest[1], kind)
+			return
+		}
 		if len(rest) == 2 {
 			s.table(w, r, project, schema, rest[1])
 			return
@@ -213,6 +229,10 @@ func tableXML(p, s string, t engine.Table) string {
 }
 func (s *Server) table(w http.ResponseWriter, r *http.Request, p, sc, t string) {
 	q := r.URL.Query()
+	if q.Has("uploads") || q.Has("uploadid") {
+		s.upload(w, r, p, sc, t, "batch")
+		return
+	}
 	if q.Has("downloads") && r.Method == "POST" {
 		s.createDownload(w, r, p, sc, t)
 		return
@@ -258,6 +278,7 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 		}
 		i := &instance{Project: p, Schema: sc, ID: id(), Name: task.Name, Query: task.Query, Status: "Success", Created: time.Now()}
 		res, e := s.Engine.Execute(r.Context(), p, sc, task.Query)
+		i.Data = res
 		if e != nil {
 			i.Status = "Failed"
 			i.Output = e.Error()
@@ -293,6 +314,10 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 		s.mu.Unlock()
 		w.Header().Set("Location", "/projects/"+url.PathEscape(p)+"/instances/"+i.ID)
 		w.WriteHeader(201)
+		return
+	}
+	if len(rest) == 1 && (r.URL.Query().Has("downloads") || r.URL.Query().Has("downloadid")) {
+		s.instanceDownload(w, r, p, sc, rest[0])
 		return
 	}
 	if len(rest) != 1 || r.Method != "GET" {
@@ -447,7 +472,7 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request, p, sc, t strin
 	var data []byte
 	if q.Has("arrow") { // Buffered C++ reader consumes one batch and advances by its row count.
 		n := len(res.Rows)
-		if n > 65536 {
+		if rawLimit > 0 && n > 65536 {
 			n = 65536
 		}
 		res.Rows = res.Rows[:n]
@@ -488,9 +513,10 @@ func compress(b []byte, accept string, arrow bool) ([]byte, string, error) {
 		case "identity", "":
 			return b, "", nil
 		case "deflate":
-			if arrow {
+			if arrow && strings.Contains(accept, ",") {
 				continue
 			}
+
 			w = zlib.NewWriter(&out)
 			encoding = token
 		case "zstd":
@@ -500,7 +526,10 @@ func compress(b []byte, accept string, arrow bool) ([]byte, string, error) {
 				return nil, "", err
 			}
 			encoding = token
-		case "lz4_frame", "x-lz4-frame":
+		case "x-snappy-framed":
+			w = snappy.NewBufferedWriter(&out)
+			encoding = token
+		case "lz4_frame", "x-lz4-frame", "x-odps-lz4-frame":
 			w = lz4.NewWriter(&out)
 			encoding = token
 		}

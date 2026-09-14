@@ -1,4 +1,4 @@
-# Tunnel 读协议与实现边界
+# Tunnel 协议与实现边界
 
 ## 当前端点
 
@@ -37,4 +37,23 @@ Tunnel Arrow 不是普通带 Schema 消息的 IPC stream：客户端从会话元
 
 ## 迁移
 
-首版只承接 CK 当前 Tunnel 下载；后续按独立里程碑补 v1 Upsert/Storage v1 等旧功能与 Storage v2。只有旧功能对齐和消费者回归完成才将 v2 替换 master。现在可通过切换容器镜像回到 v1；v1 SQLite 与 v2 DuckDB 文件不兼容，用 SQL fixture 重建数据，勿挂载同一数据库文件。
+2.1.0 在 CK 下载基础上增加 Tunnel 上传、Upsert、实例下载和 Storage API 读写，详情见 [数据传输](data-transfer.md)。Storage v1、Volume/Blob 等仍需独立里程碑。只有旧功能对齐和消费者回归完成才将 v2 替换 master。现在可通过切换容器镜像回到 v1；v1 SQLite 与 v2 DuckDB 文件不兼容，用 SQL fixture 重建数据，勿挂载同一数据库文件。
+
+
+## 2.1.0 写入与 Storage 入口
+
+| 入口 | 行为 |
+| --- | --- |
+| POST/GET/PUT/POST `/projects/p/tables/t?uploads` / `?uploadid=id` | 创建/恢复/写 block/提交；提交前不可见，重复提交幂等 |
+| POST/GET/PUT `/projects/p/tables/t/streams` | 创建/恢复/写 pack；flush 后可见；dynamic_partition 支持逐 pack 分区 |
+| POST/GET/PUT/POST/DELETE `/projects/p/tables/t/upserts` | 创建/恢复/暂存 U/D/提交/中止；支持部分列更新 |
+| POST/GET `/projects/p/instances/i?downloads` / `?downloadid=id` | SQL 实例结果快照与 Tunnel 下载，复用表读取格式 |
+| POST `/api/storage/v2` 或 `/api/storage/v3` | Action + Target 协议；Java 0.61.2-public 实际调用 v3 |
+
+Storage 表 Action：TableCreateReadSession、TableGetReadSession、TableRead、TablePreview、TableCreateWriteSession、TableGetWriteSession、TableCreateWriteStream、TableGetWriteStream、TableWrite、TableCloseWriteStream、TableCommitWriteSession、TableAbortWriteSession。实例 Action：InstanceCreateReadSession、InstanceGetReadSession（GET）、InstanceRead。
+
+Table Target 格式 `projects.p.schemas.s.tables.t`；Instance Target `projects.p.instances.i`。读 schema 为 DataSchema 平铺列；写 schema 为 TableSchema.columnType 递归类型码。Storage STRING 是 UTF8 Arrow，Tunnel STRING 是 Binary Arrow。Storage 返回含 schema/EOS 的标准 IPC stream，Tunnel 使用无 schema 的 CRC 帧。
+
+Tunnel 写入解码完整校验后才暂存或发布；MAP 校验保留发送顺序。数据写入通过 DuckDB 事务，复杂值递归生成绑定表达式，避免驱动对 NULL 数组直接绑定的限制。所有用户数据仍走参数绑定。
+
+Stream/Upsert 使用 SDK retry trace-id 识别同次重试，内容不一致返回409。Storage ExactlyOnceMode 校验 RowOffset 连续性，并校验同 offset 重放的内容，返回 ExactlyOnceRowOffset。BatchCompatible 返回带 BlockNumber/AttemptNumber/WriterStats 的 JSON CommitMessage，只接受本会话最新 attempt 的令牌；批量 commit 原子发布。

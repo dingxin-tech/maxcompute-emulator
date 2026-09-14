@@ -21,7 +21,7 @@ func main() {
 	project := flag.String("project", "test_project", "fixture project")
 	schema := flag.String("schema", "default", "fixture schema")
 	public := flag.String("public-endpoint", "", "advertised endpoint; default request Host")
-	ttl := flag.Duration("session-ttl", 30*time.Minute, "download session lifetime")
+	ttl := flag.Duration("session-ttl", 30*time.Minute, "data transfer session lifetime")
 	maxRows := flag.Int("max-rows", 100000, "maximum rows per result/session")
 	flag.Parse()
 	e, err := engine.Open(*db, *maxRows)

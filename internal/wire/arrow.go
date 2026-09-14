@@ -34,6 +34,8 @@ func appendValue(b array.Builder, t engine.Type, v any) error {
 		x.Append(Float(v))
 	case *array.BooleanBuilder:
 		x.Append(v.(bool))
+	case *array.StringBuilder:
+		x.Append(string(Bytes(v)))
 	case *array.BinaryBuilder:
 		x.Append(Bytes(v))
 	case *array.Date32Builder:
@@ -92,7 +94,11 @@ func Arrow(r engine.Result, batchRows int, tunnel bool) (out []byte, err error) 
 	}()
 	fields := []arrow.Field{}
 	for _, c := range r.Columns {
-		fields = append(fields, arrow.Field{Name: c.Name, Type: c.Parsed.Arrow(), Nullable: true})
+		typ := c.Parsed.Arrow()
+		if !tunnel {
+			typ = c.Parsed.StorageArrow()
+		}
+		fields = append(fields, arrow.Field{Name: c.Name, Type: typ, Nullable: true})
 	}
 	schema := arrow.NewSchema(fields, nil)
 	var buf bytes.Buffer

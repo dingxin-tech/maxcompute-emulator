@@ -6,6 +6,7 @@ require (
 	github.com/antlr4-go/antlr/v4 v4.13.1
 	github.com/apache/arrow-go/v18 v18.5.1
 	github.com/duckdb/duckdb-go/v2 v2.10505.0
+	github.com/golang/snappy v1.0.0
 	github.com/klauspost/compress v1.18.3
 	github.com/pierrec/lz4/v4 v4.1.25
 )

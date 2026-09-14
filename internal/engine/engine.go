@@ -153,6 +153,12 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		}
 		return none, fmt.Errorf("UnsupportedFeature: SET option")
 	case "create":
+		var primaryKeys []string
+		var ddlErr error
+		ts, primaryKeys, ddlErr = extractPrimaryKey(ts)
+		if ddlErr != nil {
+			return none, ddlErr
+		}
 		if len(ts) < 4 || word(ts[1]) != "table" {
 			return none, fmt.Errorf("UnsupportedFeature: CREATE")
 		}
@@ -181,7 +187,46 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 			}
 		}
 		if pos != len(ts) {
-			return none, fmt.Errorf("UnsupportedFeature: CREATE suffix")
+			for pos < len(ts) {
+				switch word(ts[pos]) {
+				case "stored":
+					if pos+2 >= len(ts) || word(ts[pos+1]) != "as" || word(ts[pos+2]) != "aliorc" {
+						return none, fmt.Errorf("unsupported storage format")
+					}
+					pos += 3
+				case "lifecycle":
+					pos += 2
+				case "tblproperties":
+					pos++
+					if pos >= len(ts) || ts[pos] != "(" {
+						return none, fmt.Errorf("invalid properties")
+					}
+					depth := 1
+					pos++
+					for pos < len(ts) && depth > 0 {
+						if ts[pos] == "(" {
+							depth++
+						}
+						if ts[pos] == ")" {
+							depth--
+						}
+						pos++
+					}
+				default:
+					return none, fmt.Errorf("UnsupportedFeature: CREATE suffix %s", ts[pos])
+				}
+			}
+		}
+		for _, k := range primaryKeys {
+			found := false
+			for _, c := range cols {
+				if c.Name == k {
+					found = true
+				}
+			}
+			if !found {
+				return none, fmt.Errorf("unknown primary key %s", k)
+			}
 		}
 		if _, err = load(ctx, tx, ns, name); err == nil {
 			if exists {
@@ -205,7 +250,7 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		if _, err = tx.ExecContext(ctx, "CREATE TABLE "+Quote(name)+" ("+strings.Join(defs, ",")+")"); err != nil {
 			return none, err
 		}
-		b, _ := json.Marshal(Table{Name: name, Columns: cols, Partitions: parts})
+		b, _ := json.Marshal(Table{Name: name, Columns: cols, Partitions: parts, PrimaryKeys: primaryKeys})
 		_, err = tx.ExecContext(ctx, "INSERT INTO main.emulator_catalog VALUES(?,?,?)", ns, name, string(b))
 		return none, err
 	case "drop":
