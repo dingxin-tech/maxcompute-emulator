@@ -23,6 +23,7 @@ func main() {
 	schema := flag.String("schema", "default", "fixture schema")
 	public := flag.String("public-endpoint", "", "advertised endpoint; default request Host")
 	ttl := flag.Duration("session-ttl", 30*time.Minute, "data transfer session lifetime")
+	maxSessions := flag.Int("max-sessions", 64, "maximum sessions per transfer API")
 	maxRows := flag.Int("max-rows", 100000, "maximum rows per result/session")
 	flag.Parse()
 	e, err := engine.Open(*db, *maxRows)
@@ -41,7 +42,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	s := &http.Server{Addr: *listen, Handler: server.New(e, server.Config{PublicEndpoint: *public, SessionTTL: *ttl}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
+	s := &http.Server{Addr: *listen, Handler: server.New(e, server.Config{PublicEndpoint: *public, SessionTTL: *ttl, MaxSessions: *maxSessions}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(done)
