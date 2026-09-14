@@ -33,14 +33,14 @@ Tunnel Arrow 不是普通带 Schema 消息的 IPC stream：客户端从会话元
 - [Go SDK](https://github.com/aliyun/aliyun-odps-go-sdk/tree/3e824d4bced7b5bde34c96a3389f69c29d32c3f5)：record_protoc_writer、checksum 与会话模型，交叉核对线格式。
 - [CPP SDK](https://github.com/aliyun/aliyun-odps-sdk-cpp/tree/a1a7e541753f53970131e345a4f77581a8d6a9ac)：tunnel/download.h、download.cpp、arrow_record_reader.cpp、arrow_http_stream.h、serialize.cpp；与当前 CK submodule 对齐。
 
-产品线协议实现为独立 Go 实现。内部服务端源码只用作行为对照，没有复制内部代码、生成文件或测试数据。
+协议层为独立 Go 实现，公开 SDK 是客户端兼容契约的依据。
 
 ## 迁移
 
-1.0.0-rc.1 在 CK 下载基础上增加 Tunnel 上传、Upsert、实例下载和 Storage API 读写，详情见 [数据传输](data-transfer.md)。Storage v1、Volume/Blob 等仍需独立里程碑。只有旧功能对齐和消费者回归完成才将 v2 替换 master。现在可通过切换容器镜像回到 v1；v1 SQLite 与 v2 DuckDB 文件不兼容，用 SQL fixture 重建数据，勿挂载同一数据库文件。
+1.0.0 在 CK 下载基础上增加 Tunnel 上传、Upsert、实例下载和 Storage API 读写，详情见 [数据传输](data-transfer.md)。Storage v1、Volume/Blob 等仍需独立里程碑。Go 实现在 main，旧实现保留于 legacy。需要旧功能的消费者可继续使用旧镜像；SQLite 与 DuckDB 文件不兼容，用 SQL fixture 重建数据，勿挂载同一数据库文件。
 
 
-## 1.0.0-rc.1 写入与 Storage 入口
+## 1.0.0 写入与 Storage 入口
 
 | 入口 | 行为 |
 | --- | --- |

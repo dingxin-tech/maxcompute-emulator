@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>local.emulator</groupId>
   <artifactId>java-acceptance</artifactId>
-  <version>1.0.0-rc.1</version>
+  <version>1.0.0</version>
   <properties>
     <maven.compiler.source>17</maven.compiler.source>
     <maven.compiler.target>17</maven.compiler.target>

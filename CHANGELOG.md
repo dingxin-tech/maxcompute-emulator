@@ -1,9 +1,16 @@
-## 2.0.0-ck.1（v2 分支，2026-09-14）
+# Changelog
 
-- Go/DuckDB 重写首版，新增 CK 当前 Tunnel 下载全链路、Protobuf/Arrow CRC32C 与压缩。
-- Java SDK SQL 造数、元数据、静态分区、事务覆盖和会话快照；支持公开 ODPS grammar 验证。
-- Linux amd64 Docker 与 Java SDK/Testcontainers 回归。
-- 与 v1 数据文件不兼容；Upsert/Storage v1 尚未迁移，Storage v2 留待后续；本版不替换 master。
+## 1.0.0 — 2026-09-14
+
+- Replace the Spring Boot/SQLite server with Go, DuckDB and a public ODPS grammar.
+- Add Tunnel Protobuf/Arrow batch transfers, stream upload, Upsert and instance downloads.
+- Add Storage API v2 session/read/write/commit/abort support.
+- Add durable table identity, partition metadata and empty-partition persistence.
+- Validate CRC, retries, transactional visibility and stale-table session isolation.
+- Ship Linux amd64 Docker images and Java SDK/Testcontainers acceptance tests.
+- Preserve the old implementation on `legacy`. Recreate fixtures: SQLite databases cannot be reused.
+
+Known limits and Flink mode coverage are documented in [compatibility notes](docs/release-readiness.md).
 
 以下为 v1 历史：
 

@@ -17,13 +17,13 @@ rootfs 可从本机已拉取的 amd64 Debian bookworm 系镜像 docker create/ex
 ZIG=/path/to/zig DUCKDB_SYSROOT=/path/to/bookworm-amd64-rootfs \
   scripts/build-linux-amd64.sh
 docker build --platform linux/amd64 --target prebuilt \
-  -t maxcompute-emulator:1.0.0-rc.1 .
+  -t maxcompute-emulator:1.0.0 .
 mvn -B -f tests/java/pom.xml test
-docker save maxcompute-emulator:1.0.0-rc.1 | gzip > maxcompute-emulator-1.0.0-rc.1-linux-amd64.tar.gz
-shasum -a 256 maxcompute-emulator-1.0.0-rc.1-linux-amd64.tar.gz
+docker save maxcompute-emulator:1.0.0 | gzip > maxcompute-emulator-1.0.0-linux-amd64.tar.gz
+shasum -a 256 maxcompute-emulator-1.0.0-linux-amd64.tar.gz
 ```
 
-交付使用 prebuilt 路径，编译后的 ELF 在 Linux amd64 容器内执行并接受 Java SDK 验收。Dockerfile 的常规 release 路径供 Linux/CI 直接源码构建，发布方应在自己的 CI 重跑。不包含镜像 registry 推送步骤。
+社区发布使用 Dockerfile 的 release 阶段在 Linux amd64 内从源码构建。prebuilt 是可选的本地交叉编译入口。tag 发布流程先执行 Go/SDK 验收，再推送 Docker Hub 并从该仓库拉取复测。
 
 ## 依赖下载缓存
 
