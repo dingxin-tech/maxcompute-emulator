@@ -176,7 +176,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, p, sc, t, kind s
 					rows[i] = row[:n]
 				}
 			}
-			if e = s.Engine.WriteMutations(r.Context(), p, sc, t, v.Part, rows, false, ops, partial); e != nil {
+			if e = s.Engine.WriteMutationsExpected(r.Context(), p, sc, t, v.Meta.ID, v.Part, rows, false, ops, partial); e != nil {
 				fail(w, r, 400, "InvalidData", e)
 				return
 			}
@@ -248,13 +248,15 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, p, sc, t, kind s
 		}
 		block := v.Sequence
 		if kind == "batch" {
-			if len(v.Blocks) >= 1024 {
-				fail(w, r, 429, "ResourceLimit", fmt.Errorf("block limit"))
-				return
-			}
 			block, e = strconv.ParseInt(q.Get("blockid"), 10, 64)
 			if e != nil || block < 0 {
 				fail(w, r, 400, "InvalidParameter", fmt.Errorf("invalid blockid"))
+				return
+			}
+		}
+		if kind != "stream" {
+			if _, exists := v.Blocks[block]; !exists && len(v.Blocks) >= 1024 {
+				fail(w, r, 429, "ResourceLimit", fmt.Errorf("block limit"))
 				return
 			}
 		}
@@ -263,7 +265,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, p, sc, t, kind s
 			return
 		}
 		if kind == "stream" {
-			if e = s.Engine.Write(r.Context(), p, sc, t, part, data.Rows, false, nil); e != nil {
+			if e = s.Engine.WriteMutationsExpected(r.Context(), p, sc, t, v.Meta.ID, part, data.Rows, false, nil, nil); e != nil {
 				fail(w, r, 400, "InvalidData", e)
 				return
 			}

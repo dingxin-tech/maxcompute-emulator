@@ -30,7 +30,7 @@ func (s *Server) instanceDownload(w http.ResponseWriter, r *http.Request, p, sc,
 		fail(w, r, 409, "InvalidState", fmt.Errorf("instance failed"))
 		return
 	}
-	if len(s.sessions) >= s.cfg.MaxSessions {
+	if !s.downloadCapacityLocked(i.Data.Bytes) {
 		fail(w, r, 429, "ResourceLimit", fmt.Errorf("session limit"))
 		return
 	}
@@ -56,7 +56,7 @@ func (s *Server) storageInstance(w http.ResponseWriter, r *http.Request, p, iid 
 	if action == "InstanceCreateReadSession" {
 		v = &session{ID: id(), Project: p, Schema: i.Schema, Table: "@instance_" + iid, Partition: "{}", Data: i.Data, Meta: engine.Table{Columns: i.Data.Columns, Partitions: []engine.Column{}}, Created: time.Now()}
 		s.mu.Lock()
-		if len(s.sessions) >= s.cfg.MaxSessions {
+		if !s.downloadCapacityLocked(i.Data.Bytes) {
 			s.mu.Unlock()
 			fail(w, r, 429, "ResourceLimit", fmt.Errorf("session limit"))
 			return
@@ -97,4 +97,17 @@ func (s *Server) storageInstance(w http.ResponseWriter, r *http.Request, p, iid 
 	default:
 		fail(w, r, 404, "UnsupportedOperation", fmt.Errorf("unknown instance action"))
 	}
+}
+
+// Caller holds s.mu. Instance downloads share the same capacity as table downloads.
+func (s *Server) downloadCapacityLocked(bytes int64) bool {
+	var retained int64
+	for key, old := range s.sessions {
+		if time.Since(old.Created) > s.cfg.SessionTTL {
+			delete(s.sessions, key)
+		} else {
+			retained += old.Data.Bytes
+		}
+	}
+	return len(s.sessions) < s.cfg.MaxSessions && retained+bytes <= 256<<20
 }

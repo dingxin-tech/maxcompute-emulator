@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
@@ -16,6 +17,11 @@ func (e *Engine) Write(ctx context.Context, p, s, name string, part map[string]s
 }
 
 func (e *Engine) WriteMutations(ctx context.Context, p, s, name string, part map[string]string, rows [][]any, overwrite bool, ops []byte, partial [][]int) error {
+	return e.WriteMutationsExpected(ctx, p, s, name, "", part, rows, overwrite, ops, partial)
+}
+
+// WriteMutationsExpected rejects a stale session inside the same transaction as its writes.
+func (e *Engine) WriteMutationsExpected(ctx context.Context, p, s, name, expectedID string, part map[string]string, rows [][]any, overwrite bool, ops []byte, partial [][]int) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	tx, ns, err := e.transaction(ctx, p, s)
@@ -26,6 +32,9 @@ func (e *Engine) WriteMutations(ctx context.Context, p, s, name string, part map
 	t, err := load(ctx, tx, ns, name)
 	if err != nil {
 		return err
+	}
+	if expectedID != "" && t.ID != expectedID {
+		return fmt.Errorf("TableChanged: write session belongs to a replaced table")
 	}
 	dynamic := []Column{}
 	known := map[string]bool{}
@@ -56,6 +65,13 @@ func (e *Engine) WriteMutations(ctx context.Context, p, s, name string, part map
 	filter := ""
 	if len(where) > 0 {
 		filter = " WHERE " + strings.Join(where, " AND ")
+	}
+	// Capture catalog and data partitions before mutations can remove the final row.
+	if len(t.Partitions) > 0 {
+		t.EmptyPartitions, err = partitionList(ctx, tx, t)
+		if err != nil {
+			return err
+		}
 	}
 	if overwrite {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM "+Quote(name)+filter, partArgs...); err != nil {
@@ -151,6 +167,20 @@ func (e *Engine) WriteMutations(ctx context.Context, p, s, name string, part map
 		}
 		insert := "INSERT INTO " + Quote(name) + " VALUES (" + strings.Join(placeholders, ",") + ")"
 		if _, err = tx.ExecContext(ctx, insert, args...); err != nil {
+			return err
+		}
+	}
+	if len(t.Partitions) > 0 {
+		// Merge newly written dynamic partitions using the database-cast values.
+		t.EmptyPartitions, err = partitionList(ctx, tx, t)
+		if err != nil {
+			return err
+		}
+		raw, err := json.Marshal(t)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE main.emulator_catalog SET definition=? WHERE namespace=? AND name=?", string(raw), ns, t.Name); err != nil {
 			return err
 		}
 	}

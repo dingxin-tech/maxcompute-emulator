@@ -192,6 +192,10 @@ func DecodeProtobuf(b []byte, cols []engine.Column) (result engine.Result, err e
 			}
 			global = crc32.Update(global, castagnoli, binary.LittleEndian.AppendUint32(nil, uint32(sum)))
 			result.Rows = append(result.Rows, row)
+			result.Bytes += retainedBytes(row)
+			if result.Bytes > MaxPayload {
+				return result, fmt.Errorf("decoded records exceed 64 MiB")
+			}
 			if len(result.Rows) > 1000000 {
 				return result, fmt.Errorf("too many records")
 			}
@@ -214,7 +218,6 @@ func DecodeProtobuf(b []byte, cols []engine.Column) (result engine.Result, err e
 			if e != nil || sum > math.MaxUint32 || uint32(sum) != global || d.pos != len(b) {
 				return result, fmt.Errorf("stream CRC32C mismatch or trailing data")
 			}
-			result.Bytes = int64(len(b))
 			return result, nil
 		default:
 			i := field - 1

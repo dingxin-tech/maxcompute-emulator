@@ -285,9 +285,11 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 			keys := req.StreamIds
 			if keys == nil {
 				for k, st := range v.Streams {
-					if st.Closed {
-						keys = append(keys, k)
+					if !st.Closed {
+						bad(409, "InvalidState", fmt.Errorf("unclosed stream %s", k))
+						return
 					}
+					keys = append(keys, k)
 				}
 				sort.Strings(keys)
 			}
@@ -399,6 +401,10 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 					bad(409, "RowOffsetConflict", fmt.Errorf("expected RowOffset %d", st.Offset))
 					return
 				}
+				if len(st.Requests) >= 10000 {
+					bad(429, "ResourceLimit", fmt.Errorf("retry history limit"))
+					return
+				}
 			}
 			if v.Bytes+data.Bytes > wire.MaxPayload {
 				bad(429, "ResourceLimit", fmt.Errorf("staged data exceeds 64 MiB"))
@@ -421,7 +427,7 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 			jsonResponse(w, 200, map[string]any{"ExactlyOnceRowOffset": st.Offset, "StagingId": strconv.FormatInt(st.Offset, 10)})
 			return
 		}
-		jsonResponse(w, 200, map[string]any{"TableSchema": storageWriteSchema(v), "TableId": t, "SchemaVersion": 1, "LatestSchemaVersion": 1, "RowOffset": st.Offset, "status": 0, "recordCount": st.Offset, "AccessToken": "emulator", "QuotaToken": "emulator"})
+		jsonResponse(w, 200, map[string]any{"TableSchema": storageWriteSchema(v), "TableId": v.Meta.ID, "SchemaVersion": 1, "LatestSchemaVersion": 1, "RowOffset": st.Offset, "status": 0, "recordCount": st.Offset, "AccessToken": "emulator", "QuotaToken": "emulator"})
 	default:
 		bad(404, "UnsupportedOperation", fmt.Errorf("unsupported storage action %s", action))
 	}
@@ -489,5 +495,5 @@ func (s *Server) writeStorage(ctx context.Context, v *storageSession, rows [][]a
 		}
 		rows = copyRows
 	}
-	return s.Engine.Write(ctx, v.Project, v.Schema, v.Table, v.Part, rows, overwrite, ops)
+	return s.Engine.WriteMutationsExpected(ctx, v.Project, v.Schema, v.Table, v.Meta.ID, v.Part, rows, overwrite, ops, nil)
 }

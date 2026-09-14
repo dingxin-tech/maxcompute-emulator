@@ -42,7 +42,7 @@ func DecodeArrow(b []byte, cols []engine.Column, tunnel bool) (result engine.Res
 		prefix = append(prefix, b...)
 		b = append(prefix, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0)
 	}
-	r, err := ipc.NewReader(bytes.NewReader(b))
+	r, err := ipc.NewReader(bytes.NewReader(b), ipc.WithAllocator(&budgetAllocator{}))
 	if err != nil {
 		return result, err
 	}
@@ -69,12 +69,15 @@ func DecodeArrow(b []byte, cols []engine.Column, tunnel bool) (result engine.Res
 				}
 			}
 			result.Rows = append(result.Rows, row)
+			result.Bytes += retainedBytes(row)
+			if result.Bytes > MaxPayload {
+				return result, fmt.Errorf("decoded records exceed 64 MiB")
+			}
 			if len(result.Rows) > 1000000 {
 				return result, fmt.Errorf("too many records")
 			}
 		}
 	}
-	result.Bytes = int64(len(b))
 	return result, r.Err()
 }
 func arrowValue(a arrow.Array, i int, t engine.Type) (any, error) {

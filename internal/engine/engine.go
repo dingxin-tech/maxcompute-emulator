@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
 )
@@ -30,6 +31,10 @@ func Open(path string, maxRows int) (*Engine, error) {
 			db.Close()
 			return nil, e
 		}
+	}
+	if e = migrateTableIDs(db); e != nil {
+		db.Close()
+		return nil, e
 	}
 	return &Engine{db: db, maxRows: maxRows}, nil
 }
@@ -124,6 +129,7 @@ func (e *Engine) Execute(ctx context.Context, p, s, sqlText string) (Result, err
 	defer tx.Rollback()
 	var result Result
 	for _, ts := range stmts {
+		ts = localQualifiedNames(ts, p, s)
 		result, err = e.exec(ctx, tx, ns, ts)
 		if err != nil {
 			return Result{}, err
@@ -152,7 +158,10 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 			return none, nil
 		}
 		return none, fmt.Errorf("UnsupportedFeature: SET option")
+	case "alter":
+		return none, e.alterMetadata(ctx, tx, ns, ts)
 	case "create":
+		props := map[string]string{}
 		var primaryKeys []string
 		var ddlErr error
 		ts, primaryKeys, ddlErr = extractPrimaryKey(ts)
@@ -186,6 +195,11 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 				return none, err
 			}
 		}
+		for _, c := range parts {
+			if c.Parsed.Name != "string" {
+				return none, fmt.Errorf("UnsupportedFeature: partition columns must be STRING")
+			}
+		}
 		if pos != len(ts) {
 			for pos < len(ts) {
 				switch word(ts[pos]) {
@@ -194,24 +208,35 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 						return none, fmt.Errorf("unsupported storage format")
 					}
 					pos += 3
+				case "comment":
+					if pos+1 >= len(ts) {
+						return none, fmt.Errorf("missing comment")
+					}
+					props["comment"] = strings.Trim(ts[pos+1], "'")
+					pos += 2
 				case "lifecycle":
+					if pos+1 >= len(ts) {
+						return none, fmt.Errorf("missing lifecycle")
+					}
+					props["lifecycle"] = ts[pos+1]
 					pos += 2
 				case "tblproperties":
 					pos++
 					if pos >= len(ts) || ts[pos] != "(" {
 						return none, fmt.Errorf("invalid properties")
 					}
-					depth := 1
-					pos++
-					for pos < len(ts) && depth > 0 {
-						if ts[pos] == "(" {
-							depth++
-						}
-						if ts[pos] == ")" {
-							depth--
-						}
+					for pos+1 < len(ts) && ts[pos+1] != ")" {
 						pos++
+						if pos+2 >= len(ts) || ts[pos+1] != "=" {
+							return none, fmt.Errorf("invalid properties")
+						}
+						props[strings.Trim(ts[pos], "'\"")] = strings.Trim(ts[pos+2], "'\"")
+						pos += 2
+						if pos+1 < len(ts) && ts[pos+1] == "," {
+							pos++
+						}
 					}
+					pos += 2
 				default:
 					return none, fmt.Errorf("UnsupportedFeature: CREATE suffix %s", ts[pos])
 				}
@@ -250,7 +275,11 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		if _, err = tx.ExecContext(ctx, "CREATE TABLE "+Quote(name)+" ("+strings.Join(defs, ",")+")"); err != nil {
 			return none, err
 		}
-		b, _ := json.Marshal(Table{Name: name, Columns: cols, Partitions: parts, PrimaryKeys: primaryKeys})
+		tableID, err := newTableID()
+		if err != nil {
+			return none, err
+		}
+		b, _ := json.Marshal(Table{ID: tableID, Name: name, Columns: cols, Partitions: parts, PrimaryKeys: primaryKeys, Properties: props, Created: time.Now().Unix()})
 		_, err = tx.ExecContext(ctx, "INSERT INTO main.emulator_catalog VALUES(?,?,?)", ns, name, string(b))
 		return none, err
 	case "drop":
@@ -270,6 +299,26 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		}
 		_, err = tx.ExecContext(ctx, "DELETE FROM main.emulator_catalog WHERE namespace=? AND name=?", ns, name)
 		return none, err
+	case "truncate":
+		if len(ts) < 3 || word(ts[1]) != "table" {
+			return none, fmt.Errorf("invalid TRUNCATE")
+		}
+		name, end, err := nameAt(ts, 2)
+		if err != nil || end != len(ts) {
+			return none, fmt.Errorf("invalid TRUNCATE target")
+		}
+		table, err := load(ctx, tx, ns, name)
+		if err != nil {
+			return none, err
+		}
+		table.EmptyPartitions, err = partitionList(ctx, tx, table)
+		if err != nil {
+			return none, err
+		}
+		if _, err = tx.ExecContext(ctx, "DELETE FROM "+Quote(name)); err != nil {
+			return none, err
+		}
+		return none, saveTable(ctx, tx, ns, table)
 	case "insert":
 		if len(ts) < 4 {
 			return none, fmt.Errorf("invalid INSERT")
@@ -307,6 +356,13 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		if word(ts[pos]) != "values" && word(ts[pos]) != "select" && word(ts[pos]) != "with" {
 			return none, fmt.Errorf("UnsupportedFeature: INSERT source")
 		}
+		table.EmptyPartitions, err = partitionList(ctx, tx, table)
+		if err != nil {
+			return none, err
+		}
+		if len(part) > 0 {
+			table.EmptyPartitions = append(table.EmptyPartitions, part)
+		}
 		// Snapshot the input first: INSERT OVERWRITE t SELECT ... FROM t must see old t.
 		if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE __emulator_stage AS "+source); err != nil {
 			return none, err
@@ -339,6 +395,9 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		}
 		q += " FROM __emulator_stage"
 		_, err = tx.ExecContext(ctx, q, args...)
+		if err == nil {
+			err = saveTable(ctx, tx, ns, table)
+		}
 		return none, err
 	case "select", "with":
 		return e.query(ctx, tx, render(ts))

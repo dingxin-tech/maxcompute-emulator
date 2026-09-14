@@ -30,7 +30,7 @@ public class EmulatorTest {
       container =
           new GenericContainer<>(
                   DockerImageName.parse(
-                      System.getProperty("emulator.image", "maxcompute-emulator:2.1.0")))
+                      System.getProperty("emulator.image", "maxcompute-emulator:1.0.0-rc.1")))
               .withExposedPorts(8080)
               .waitingFor(Wait.forHttp("/readyz"));
       container.start();
@@ -74,6 +74,44 @@ public class EmulatorTest {
             + t
             + " values(1,'AbC 中文',12.34,true),(2,'comma,quote',-56.78,false),(3,NULL,NULL,NULL)");
     return t;
+  }
+
+  @Test
+  void partitionMetadataLifecycle() throws Exception {
+    String t = table();
+    sql("create table " + t + "(id bigint, name string) partitioned by(ds string, region string)");
+    Table meta = odps.tables().get(t);
+    var a = new PartitionSpec("ds='20260914',region='cn'");
+    var b = new PartitionSpec("ds='20260915',region='us'");
+    assertFalse(meta.hasPartition(a));
+    meta.createPartition(a, true);
+    meta.createPartition(a, true);
+    assertTrue(meta.hasPartition(a));
+    assertNotNull(meta.getPartition(a).getCreatedTime());
+    assertEquals(1, meta.getPartitions().size());
+    var u = tunnel().createUploadSession("test_project", t, b);
+    try (var w = u.openRecordWriter(0)) {
+      var row = u.newRecord();
+      row.setBigint(0, 42L);
+      row.setString(1, "flink");
+      w.write(row);
+    }
+    u.commit(new Long[] {0L});
+    assertTrue(meta.hasPartition(b));
+    assertEquals(2, meta.getPartitions().size());
+    meta.deletePartition(b);
+    assertFalse(meta.hasPartition(b));
+    assertEquals(1, meta.getPartitions().size());
+    String pk = table();
+    sql(
+        "create table "
+            + pk
+            + "(id bigint not null, name string, primary key(id))"
+            + " tblproperties('transactional'='true')");
+    Table keyTable = odps.tables().get(pk);
+    assertTrue(keyTable.isTransactional());
+    assertEquals(List.of("id"), keyTable.getPrimaryKey());
+    assertEquals("1", keyTable.getSchemaVersion());
   }
 
   @Test

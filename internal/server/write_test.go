@@ -113,6 +113,10 @@ func TestStorageExactlyOnceReplayAndAtomicCommit(t *testing.T) {
 	if code != 409 {
 		t.Fatal("gap", code)
 	}
+	code, _ = call("TableCommitWriteSession&SessionId="+sid, `{}`)
+	if code != 409 {
+		t.Fatal("implicit commit must reject unclosed streams", code)
+	}
 	code, _ = call("TableCommitWriteSession&SessionId="+sid, `{"StreamIds":["s"],"StreamVersions":[1]}`)
 	if code != 409 {
 		t.Fatal("unclosed", code)

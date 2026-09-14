@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -43,15 +44,39 @@ func main() {
 	s := &http.Server{Addr: *listen, Handler: server.New(e, server.Config{PublicEndpoint: *public, SessionTTL: *ttl}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-done
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		s.Shutdown(ctx)
-	}()
+	defer signal.Stop(done)
+	listener, err := net.Listen("tcp", s.Addr)
+	if err != nil {
+		slog.Error("listen", "error", err)
+		os.Exit(1)
+	}
 	slog.Info("emulator ready", "version", server.Version, "listen", *listen)
-	if err = s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err = serveUntilSignal(s, listener, done); err != nil {
 		slog.Error("http", "error", err)
 		os.Exit(1)
+	}
+}
+
+func serveUntilSignal(s *http.Server, listener net.Listener, signals <-chan os.Signal) error {
+	served := make(chan error, 1)
+	go func() { served <- s.Serve(listener) }()
+	select {
+	case err := <-served:
+		if err == http.ErrServerClosed {
+			return nil
+		}
+		return err
+	case <-signals:
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		// Shutdown closes the listener first; wait here for active handlers before
+		// main closes DuckDB or exits the process.
+		if err := s.Shutdown(ctx); err != nil {
+			s.Close()
+			<-served
+			return err
+		}
+		<-served
+		return nil
 	}
 }

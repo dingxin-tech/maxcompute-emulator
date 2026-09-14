@@ -26,7 +26,7 @@ import (
 	"github.com/pierrec/lz4/v4"
 )
 
-const Version = "2.1.0"
+const Version = "1.0.0-rc.1"
 
 type Config struct {
 	SessionTTL     time.Duration
@@ -211,21 +211,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				fail(w, r, 500, "InternalError", e)
 				return
 			}
-			var b strings.Builder
-			b.WriteString("<Tables><Marker></Marker><MaxItems>10000</MaxItems>")
-			for _, t := range tables {
-				b.WriteString(tableXML(project, schema, t))
-			}
-			b.WriteString("</Tables>")
-			xmlResponse(w, b.String())
+			s.listTables(w, r, project, schema, tables)
 			return
 		}
 	}
 	fail(w, r, 404, "UnsupportedOperation", fmt.Errorf("unsupported endpoint"))
 }
 func tableXML(p, s string, t engine.Table) string {
-	b, _ := json.Marshal(map[string]any{"columns": t.Columns, "partitionKeys": t.Partitions})
-	return "<Table><Name>" + esc(t.Name) + "</Name><TableId>" + esc(t.Name) + "</TableId><Project>" + esc(p) + "</Project><SchemaName>" + esc(s) + "</SchemaName><Owner>emulator</Owner><Type>MANAGED_TABLE</Type><Schema>" + esc(string(b)) + "</Schema><Comment></Comment></Table>"
+	reservedMap := map[string]any{"Transactional": t.Properties["transactional"] == "true", "PrimaryKey": append([]string{}, t.PrimaryKeys...), "schema_version": "1"}
+	if len(t.PrimaryKeys) > 0 {
+		reservedMap["ClusterType"] = "hash"
+		reservedMap["BucketNum"] = 1
+		reservedMap["ClusterCols"] = t.PrimaryKeys
+	}
+	reserved, _ := json.Marshal(reservedMap)
+	lifecycle, _ := strconv.ParseInt(t.Properties["lifecycle"], 10, 64)
+	b, _ := json.Marshal(map[string]any{"columns": t.Columns, "partitionKeys": t.Partitions, "Reserved": string(reserved), "createTime": t.Created, "lastDDLTime": t.Created, "lastModifiedTime": t.Created, "lifecycle": lifecycle})
+	return "<Table><Name>" + esc(t.Name) + "</Name><TableId>" + esc(t.ID) + "</TableId><Project>" + esc(p) + "</Project><SchemaName>" + esc(s) + "</SchemaName><Owner>emulator</Owner><Type>MANAGED_TABLE</Type><Schema>" + esc(string(b)) + "</Schema><Comment>" + esc(t.Properties["comment"]) + "</Comment></Table>"
 }
 func (s *Server) table(w http.ResponseWriter, r *http.Request, p, sc, t string) {
 	q := r.URL.Query()
@@ -251,7 +253,7 @@ func (s *Server) table(w http.ResponseWriter, r *http.Request, p, sc, t string) 
 		return
 	}
 	if q.Has("partitions") || q.Has("partition") {
-		fail(w, r, 400, "UnsupportedOperation", fmt.Errorf("partition listing not in CK Tunnel M1; specify partition when downloading"))
+		s.partitionMetadata(w, r, p, sc, table)
 		return
 	}
 	xmlResponse(w, tableXML(p, sc, table))
@@ -277,6 +279,20 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 			task.Name = "AnonymousSQLTask"
 		}
 		i := &instance{Project: p, Schema: sc, ID: id(), Name: task.Name, Query: task.Query, Status: "Success", Created: time.Now()}
+		// Reserve capacity before executing SQL: a rejected INSERT must not commit.
+		pending := *i
+		pending.Status = "Running"
+		if !s.reserveInstance(&pending) {
+			fail(w, r, 429, "ResourceLimit", fmt.Errorf("instance limit"))
+			return
+		}
+		defer func() {
+			s.mu.Lock()
+			if s.instances[i.ID] == &pending {
+				delete(s.instances, i.ID)
+			}
+			s.mu.Unlock()
+		}()
 		res, e := s.Engine.Execute(r.Context(), p, sc, task.Query)
 		i.Data = res
 		if e != nil {
@@ -299,19 +315,7 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 			cw.Flush()
 			i.Output = b.String()
 		}
-		s.mu.Lock()
-		for k, old := range s.instances {
-			if time.Since(old.Created) > s.cfg.SessionTTL {
-				delete(s.instances, k)
-			}
-		}
-		if len(s.instances) >= 10000 {
-			s.mu.Unlock()
-			fail(w, r, 429, "ResourceLimit", fmt.Errorf("instance limit"))
-			return
-		}
-		s.instances[i.ID] = i
-		s.mu.Unlock()
+		s.publishInstance(i)
 		w.Header().Set("Location", "/projects/"+url.PathEscape(p)+"/instances/"+i.ID)
 		w.WriteHeader(201)
 		return
@@ -327,7 +331,7 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 	s.mu.Lock()
 	i := s.instances[rest[0]]
 	s.mu.Unlock()
-	if i == nil || i.Project != p || i.Schema != sc {
+	if i == nil || i.Project != p || i.Schema != sc || i.Status == "Running" || time.Since(i.Created) > s.cfg.SessionTTL {
 		fail(w, r, 404, "NoSuchInstance", fmt.Errorf("unknown instance"))
 		return
 	}
@@ -340,6 +344,57 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 		return
 	}
 	xmlResponse(w, "<Instance><Status>Terminated</Status><Tasks><Task Type=\"SQL\"><Name>"+esc(i.Name)+"</Name><Status>"+i.Status+"</Status><StartTime>"+now+"</StartTime><EndTime>"+now+"</EndTime><Result>"+esc(i.Output)+"</Result></Task></Tasks></Instance>")
+}
+
+// Instance results retain both typed rows and the SQL API's CSV representation.
+// A single bounded result can expand when CSV formats BINARY values, hence this
+// budget is larger than the engine's 64 MiB result limit. Eviction happens after
+// execution without rejecting an already committed SQL operation.
+const maxInstanceBytes int64 = 512 << 20
+
+func instanceBytes(i *instance) int64 {
+	return i.Data.Bytes + int64(len(i.Query)+len(i.Output))
+}
+
+func (s *Server) reserveInstance(i *instance) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, old := range s.instances {
+		if old.Status != "Running" && time.Since(old.Created) > s.cfg.SessionTTL {
+			delete(s.instances, key)
+		}
+	}
+	if len(s.instances) >= 10000 {
+		return false
+	}
+	s.instances[i.ID] = i
+	return true
+}
+
+func (s *Server) publishInstance(i *instance) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var total int64
+	for key, old := range s.instances {
+		if key != i.ID {
+			total += instanceBytes(old)
+		}
+	}
+	for total+instanceBytes(i) > maxInstanceBytes {
+		var oldest *instance
+		var oldestKey string
+		for key, old := range s.instances {
+			if key != i.ID && old.Status != "Running" && (oldest == nil || old.Created.Before(oldest.Created)) {
+				oldest, oldestKey = old, key
+			}
+		}
+		if oldest == nil {
+			break
+		}
+		total -= instanceBytes(oldest)
+		delete(s.instances, oldestKey)
+	}
+	s.instances[i.ID] = i
 }
 func (s *Server) createDownload(w http.ResponseWriter, r *http.Request, p, sc, t string) {
 	part, err := engine.ParsePartition(r.URL.Query().Get("partition"))

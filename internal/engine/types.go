@@ -22,6 +22,10 @@ type Column struct {
 	Parsed   Type   `json:"-"`
 }
 type Table struct {
+	ID                  string
+	Properties          map[string]string
+	Created             int64
+	EmptyPartitions     []map[string]string
 	PrimaryKeys         []string
 	Name                string
 	Columns, Partitions []Column
