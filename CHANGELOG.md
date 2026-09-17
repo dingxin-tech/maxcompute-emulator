@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add JSON Tunnel lifecycle logs with per-process session hashes and requested ranges.
+- Add opt-in, expiring protocol faults for retries, cancellation, corrupt streams and finalization.
+- Resolve default/named quotas and return QuotaNotExist for missing names.
+- Add optional local ODPS v2/v4/STS signature, date and read/write ACL verification.
+- Enable public SQL TIMESTAMP_NTZ and MAP fixtures, nested/empty collections and numeric boundary tests.
+
 - Correct Tunnel Arrow ZSTD/LZ4 compression to use IPC buffers, preserving Tunnel CRC framing.
 - Reject missing projects and missing download partitions with distinct 404 codes; keep empty partitions valid.
 - Return `InvalidPartitionSpec` for invalid download partition specifications.

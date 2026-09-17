@@ -34,8 +34,11 @@ func (s *Server) instanceDownload(w http.ResponseWriter, r *http.Request, p, sc,
 		fail(w, r, 429, "ResourceLimit", fmt.Errorf("session limit"))
 		return
 	}
-	v := &session{ID: id(), Project: p, Schema: sc, Table: "@instance_" + iid, Partition: "{}", Data: i.Data, Meta: engine.Table{Columns: i.Data.Columns, Partitions: []engine.Column{}}, Created: time.Now()}
+	v := &session{ID: id(), Project: p, Schema: sc, Table: "@instance_" + iid, Partition: "{}", Quota: trace(r).Quota, Data: i.Data, Meta: engine.Table{Columns: i.Data.Columns, Partitions: []engine.Column{}}, Created: time.Now()}
 	s.sessions[v.ID] = v
+	if tr := trace(r); tr != nil {
+		tr.DownloadHash = s.hashSession(v.ID)
+	}
 	jsonResponse(w, 200, sessionJSON(v))
 }
 func (s *Server) storageInstance(w http.ResponseWriter, r *http.Request, p, iid string) {
@@ -54,7 +57,7 @@ func (s *Server) storageInstance(w http.ResponseWriter, r *http.Request, p, iid 
 		return
 	}
 	if action == "InstanceCreateReadSession" {
-		v = &session{ID: id(), Project: p, Schema: i.Schema, Table: "@instance_" + iid, Partition: "{}", Data: i.Data, Meta: engine.Table{Columns: i.Data.Columns, Partitions: []engine.Column{}}, Created: time.Now()}
+		v = &session{ID: id(), Project: p, Schema: i.Schema, Table: "@instance_" + iid, Partition: "{}", Quota: trace(r).Quota, Data: i.Data, Meta: engine.Table{Columns: i.Data.Columns, Partitions: []engine.Column{}}, Created: time.Now()}
 		s.mu.Lock()
 		if !s.downloadCapacityLocked(i.Data.Bytes) {
 			s.mu.Unlock()
@@ -62,6 +65,9 @@ func (s *Server) storageInstance(w http.ResponseWriter, r *http.Request, p, iid 
 			return
 		}
 		s.sessions[v.ID] = v
+		if tr := trace(r); tr != nil {
+			tr.DownloadHash = s.hashSession(v.ID)
+		}
 		s.mu.Unlock()
 	}
 	if v == nil || v.Project != p || v.Table != "@instance_"+iid || time.Since(v.Created) > s.cfg.SessionTTL {
@@ -70,7 +76,7 @@ func (s *Server) storageInstance(w http.ResponseWriter, r *http.Request, p, iid 
 	}
 	switch action {
 	case "InstanceCreateReadSession", "InstanceGetReadSession":
-		jsonResponse(w, 200, map[string]any{"DownloadID": v.ID, "RecordCount": len(v.Data.Rows), "Status": "normal", "TableSchema": writeSchema(v.Data.Columns), "QuotaName": ""})
+		jsonResponse(w, 200, map[string]any{"DownloadID": v.ID, "RecordCount": len(v.Data.Rows), "Status": "normal", "TableSchema": writeSchema(v.Data.Columns), "QuotaName": v.Quota})
 	case "InstanceRead":
 		start, n := int64(0), int64(len(v.Data.Rows))
 		var err error

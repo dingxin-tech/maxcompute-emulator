@@ -74,7 +74,7 @@ See [data transfer](docs/data-transfer.md) and [protocol details](docs/protocol.
 
 ## Scope and limitations
 
-This is a local/CI test service. Authentication signatures and permissions are **not validated**; keep it on a trusted test network. It is not a replacement for real MaxCompute acceptance tests.
+This is a local/CI test service. By default authentication signatures and permissions are **not validated**; optional strict mode uses local test credentials; keep it on a trusted test network. It is not a replacement for real MaxCompute acceptance tests.
 
 Unsupported: Storage v1, Volume/Blob, CDC/incremental reads, filter predicate pushdown, explicit Schema management, column schema evolution, resources/UDF management, distributed scheduling, and full ODPS SQL semantics. Unsupported operations return errors rather than cloud behavior being assumed.
 
@@ -104,3 +104,5 @@ Native builds require the Go version in `go.mod` and a C/C++ compiler (CGO). The
 Bug reports should include the SDK/connector version, a minimal fixture, expected/actual rows and a request ID. Please use dummy credentials and synthetic data.
 
 Licensed under Apache-2.0. Third-party attribution: [NOTICE](NOTICE) and [licenses](docs/third-party-licenses.txt).
+
+[Reliability controls](docs/reliability.md): JSON session logs, bounded protocol faults, named quotas, optional strict authentication and SQL type fixtures.

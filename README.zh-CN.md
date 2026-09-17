@@ -2,7 +2,7 @@
 
 Go + DuckDB 实现的本地 MaxCompute 测试服务。**1.0.0** 支持 ClickHouse 当前 ODPS-CPP Tunnel 读表，以及 Java SDK 的 Tunnel 批量/流式上传、Upsert、实例结果下载、Storage API 批量/流式 Arrow 读写。[English](README.md) · [发布评审与元数据/Flink 支持范围](docs/release-readiness.md)。支持矩阵和回归用例见 [docs/data-transfer.md](docs/data-transfer.md)。
 
-`main` 为 Go 实现，原 Spring Boot/SQLite 版本保留在 [`legacy`](https://github.com/dingxin-tech/maxcompute-emulator/tree/legacy)。权限模拟、Storage v1 和分布式事务尚未实现。本服务接受测试 AK/SK，不验证签名，适用于本地与 CI 测试环境。
+`main` 为 Go 实现，原 Spring Boot/SQLite 版本保留在 [`legacy`](https://github.com/dingxin-tech/maxcompute-emulator/tree/legacy)。Storage v1 和分布式事务尚未实现。默认接受测试 AK/SK；可选 strict 模式检查本地测试凭据的签名、STS、日期和读写权限，适用于本地与 CI 测试环境。
 
 ## 启动镜像
 
@@ -88,7 +88,7 @@ v1 Testcontainers 的模式保留，但就绪条件改为 HTTP `/readyz`，无�
 | 能力 | 当前行为 |
 | --- | --- |
 | SQL | CREATE/DROP TABLE、INSERT INTO、INSERT OVERWRITE、SELECT/WITH、常用 DuckDB 兼容表达式；ANTLR 验证 ODPS 语法 |
-| 类型 | BIGINT/INT/SMALLINT/TINYINT、FLOAT/DOUBLE、BOOLEAN、STRING/BINARY、DECIMAL(p,s) p≤38、DATE/DATETIME/TIMESTAMP、ARRAY/MAP/STRUCT |
+| 类型 | BIGINT/INT/SMALLINT/TINYINT、FLOAT/DOUBLE、BOOLEAN、STRING/BINARY、DECIMAL(p,s) p≤38、DATE/DATETIME/TIMESTAMP/TIMESTAMP_NTZ、ARRAY/MAP/STRUCT |
 | 分区 | SQL 和 Tunnel 下载使用完整静态分区；Tunnel 流式写支持动态分区；Storage 支持动态/静态写、跨分区快照和分区筛选 |
 | 覆盖 | staging 后事务提交；失败保留原数据；已有下载会话不受后续写入影响 |
 | 数据协议 | Protobuf 逐记录与全流 CRC32C；无 schema 的 Arrow RecordBatch + Tunnel chunk CRC32C |
@@ -118,3 +118,5 @@ mvn -B -f tests/java/pom.xml test
 本次交付也验证了 macOS arm64 → Linux amd64 的 Zig 构建路径，命令见 [docs/build.md](docs/build.md)。模块依赖锁定在 go.mod/go.sum；ANTLR 生成代码已入库，日常构建无需 Java。语法来源与再生成流程见 [grammar/README.md](grammar/README.md)。
 
 Apache-2.0；第三方来源见 [NOTICE](NOTICE)。
+
+[可靠性测试配置](docs/reliability.md)：session JSON 日志、协议故障注入、命名 quota、可选严格鉴权与 SQL 类型 fixture。

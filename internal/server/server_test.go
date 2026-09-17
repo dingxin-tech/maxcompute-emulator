@@ -24,7 +24,7 @@ import (
 
 func fixture(t *testing.T, c Config) (*Server, *httptest.Server) {
 	t.Helper()
-	e, err := engine.Open("", 10000)
+	e, err := engine.Open("", 20000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +37,7 @@ func fixture(t *testing.T, c Config) (*Server, *httptest.Server) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.Quotas = append(c.Quotas, "q")
 	s := New(e, c)
 	h := httptest.NewServer(s)
 	t.Cleanup(h.Close)

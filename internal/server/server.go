@@ -34,6 +34,10 @@ type Config struct {
 	MaxSessions    int
 	PublicEndpoint string
 	QueryTimeout   time.Duration
+	TestMode       bool
+	Quotas         []string
+	AuthMode       string
+	Credentials    map[string]Credential
 }
 type session struct {
 	ID, Project, Schema, Table, Partition, Quota string
@@ -55,6 +59,8 @@ type Server struct {
 	writes    map[string]*writeSession
 	storage   map[string]*storageSession
 	inflight  chan struct{}
+	logKey    []byte
+	faults    map[string]*FaultRule
 }
 
 func New(e *engine.Engine, c Config) *Server {
@@ -70,7 +76,7 @@ func New(e *engine.Engine, c Config) *Server {
 	if c.QueryTimeout == 0 {
 		c.QueryTimeout = 30 * time.Second
 	}
-	return &Server{Engine: e, cfg: c, sessions: map[string]*session{}, instances: map[string]*instance{}, writes: map[string]*writeSession{}, storage: map[string]*storageSession{}, inflight: make(chan struct{}, 16)}
+	return &Server{logKey: []byte(id()), faults: map[string]*FaultRule{}, Engine: e, cfg: c, sessions: map[string]*session{}, instances: map[string]*instance{}, writes: map[string]*writeSession{}, storage: map[string]*storageSession{}, inflight: make(chan struct{}, 16)}
 }
 func id() string {
 	var b [16]byte
@@ -90,6 +96,9 @@ func xmlResponse(w http.ResponseWriter, s string) {
 	io.WriteString(w, s)
 }
 func fail(w http.ResponseWriter, r *http.Request, status int, code string, e error) {
+	if t := trace(r); t != nil {
+		t.ErrorCode = code
+	}
 	message := e.Error()
 	if len(message) > 600 {
 		message = message[:600]
@@ -103,14 +112,10 @@ func fail(w http.ResponseWriter, r *http.Request, status int, code string, e err
 	}
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	select {
-	case s.inflight <- struct{}{}:
-		defer func() { <-s.inflight }()
-	default:
-		w.Header().Set("Retry-After", "1")
-		http.Error(w, "request capacity exceeded", http.StatusServiceUnavailable)
-		return
-	}
+	t := s.requestTrace(r)
+	r = withTrace(r, t)
+	sw := &statusWriter{ResponseWriter: w}
+	w = sw
 	start := time.Now()
 	requestID := id()
 	w.Header().Set("x-odps-request-id", requestID)
@@ -118,18 +123,49 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Last-Modified", start.UTC().Format(http.TimeFormat))
 	defer func() {
 		if e := recover(); e != nil {
-			slog.Error("request panic", "request_id", requestID, "error", e)
+			slog.Error("request panic", "request_id", requestID)
 			fail(w, r, 500, "InternalError", fmt.Errorf("request failed"))
 		}
-		slog.Info("request", "method", r.Method, "path", r.URL.Path, "request_id", requestID, "elapsed_ms", time.Since(start).Milliseconds())
+		t.Status = sw.status
+		if t.Status == 0 {
+			t.Status = 200
+		}
+		t.Elapsed = time.Since(start).Milliseconds()
+		if enc := w.Header().Get("Content-Encoding"); enc != "" {
+			t.Compression = enc
+		}
+		if t.Action != "" {
+			slog.Info("tunnel", "request_id", requestID, "action", t.Action, "download_id_hash", t.DownloadHash, "project", t.Project, "table", t.Table, "partition_present", t.Partition, "start", t.Start, "count", t.Count, "columns_count", t.Columns, "format", t.Format, "compression", t.Compression, "status", t.Status, "error_code", t.ErrorCode, "elapsed_ms", t.Elapsed, "quota", t.Quota)
+		} else {
+			slog.Info("request", "method", r.Method, "request_id", requestID, "status", t.Status, "elapsed_ms", t.Elapsed)
+		}
 	}()
+	select {
+	case s.inflight <- struct{}{}:
+		defer func() { <-s.inflight }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		fail(w, r, 503, "ServiceUnavailable", fmt.Errorf("request capacity exceeded"))
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.QueryTimeout)
 	defer cancel()
 	r = r.WithContext(ctx)
 	r.Body = http.MaxBytesReader(w, r.Body, wire.MaxPayload)
+	if strings.HasPrefix(r.URL.Path, "/__test/") {
+		if r.URL.Path == "/__test/faults" || strings.HasPrefix(r.URL.Path, "/__test/faults/") {
+			s.faultsAPI(w, r)
+		} else {
+			http.NotFound(w, r)
+		}
+		return
+	}
 	path := strings.Trim(r.URL.Path, "/")
 	if strings.HasPrefix(path, "api/") {
 		path = strings.TrimPrefix(path, "api/")
+	}
+	if path != "healthz" && path != "readyz" && !s.authenticate(w, r) {
+		return
 	}
 	if path == "healthz" || path == "readyz" || path == "init" {
 		if path == "init" && r.Method == "POST" {
@@ -155,7 +191,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "capabilities" {
-		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; ODPS2 subset", "auth": "test-only; signatures not validated"})
+		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; ODPS2 subset", "auth": s.authDescription(), "test_faults": s.cfg.TestMode, "quotas": append([]string{"default"}, s.cfg.Quotas...)})
 		return
 	}
 	parts := strings.Split(path, "/")
@@ -165,6 +201,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	project := parts[1]
 	if !s.checkProject(w, r, project) {
+		return
+	}
+	if !s.beforeTunnel(w, r) {
 		return
 	}
 	schema := r.URL.Query().Get("curr_schema")
@@ -425,7 +464,7 @@ func (s *Server) createDownload(w http.ResponseWriter, r *http.Request, p, sc, t
 		return
 	}
 	partJSON, _ := json.Marshal(part)
-	sess := &session{ID: id(), Project: p, Schema: sc, Table: strings.ToLower(t), Partition: string(partJSON), Quota: r.URL.Query().Get("quotaName"), Data: data, Meta: meta, Created: time.Now()}
+	sess := &session{ID: id(), Project: p, Schema: sc, Table: strings.ToLower(t), Partition: string(partJSON), Quota: trace(r).Quota, Data: data, Meta: meta, Created: time.Now()}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k, v := range s.sessions {
@@ -443,6 +482,9 @@ func (s *Server) createDownload(w http.ResponseWriter, r *http.Request, p, sc, t
 	}
 	w.Header().Set("Last-Modified", sess.Created.UTC().Format(http.TimeFormat))
 	s.sessions[sess.ID] = sess
+	if t := trace(r); t != nil {
+		t.DownloadHash = s.hashSession(sess.ID)
+	}
 	jsonResponse(w, 200, sessionJSON(sess))
 }
 func sessionJSON(s *session) map[string]any {
@@ -529,6 +571,7 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request, p, sc, t strin
 		}
 		res = engine.Result{Columns: cols, Rows: rows}
 	}
+	res = faultRows(r, res)
 	rawLimit := int64(0)
 	if q.Has("raw_size") {
 		rawLimit, e = strconv.ParseInt(q.Get("raw_size"), 10, 64)
@@ -558,10 +601,31 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request, p, sc, t strin
 		}
 	} else {
 		data, e = wire.Protobuf(res)
+		if tr := trace(r); tr != nil && tr.fault != nil && tr.fault.Type == "disconnect_after_rows" {
+			data, e = wire.ProtobufPrefix(res)
+		}
 	}
 	if e != nil {
 		fail(w, r, 400, "SerializationError", e)
 		return
+	}
+	if t := trace(r); t != nil && t.fault != nil {
+		switch t.fault.Type {
+		case "empty_arrow_batch":
+			data, e = wire.EmptyTunnelArrow(res)
+		case "malformed_arrow":
+			data = wire.ArrowChunk([]byte{255, 255, 255, 255, 7, 0, 0, 0, 1, 2, 3})
+		case "malformed_protobuf":
+			data = []byte{0x0f}
+		case "crc_mismatch":
+			if len(data) > 0 {
+				data[len(data)-1] ^= 0x01
+			}
+		}
+		if e != nil {
+			fail(w, r, 500, "InternalError", e)
+			return
+		}
 	}
 	var encoded []byte
 	var encoding string
@@ -579,6 +643,17 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request, p, sc, t strin
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.Itoa(len(encoded)))
+	if t := trace(r); t != nil && t.fault != nil {
+		e := t.fault
+		switch e.Type {
+		case "disconnect_after_bytes":
+			n := min(e.Bytes, len(encoded))
+			w.Write(encoded[:n])
+			return
+		case "disconnect_after_rows":
+			w.Header().Set("Content-Length", strconv.Itoa(len(encoded)+1))
+		}
+	}
 	w.Write(encoded)
 }
 func compress(b []byte, accept string, arrow bool) ([]byte, string, error) {

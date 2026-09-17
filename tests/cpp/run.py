@@ -1,7 +1,7 @@
 """Local emulator only: synthetic fixtures; SDK CRC stream / Arrow IPC contract probe.
 Not a complete SDK HTTP client or ClickHouse E2E replacement.
 """
-import json, subprocess, sys, tempfile, urllib.request, urllib.error
+import json, subprocess, sys, tempfile, urllib.request, urllib.error, time
 from urllib.parse import urlencode
 from xml.sax.saxutils import escape
 import xml.etree.ElementTree as ET
@@ -17,6 +17,13 @@ def sql(text):
     result=ET.fromstring(call(location))
     if result.findtext('./Tasks/Task/Status')!='Success':
         raise RuntimeError('fixture SQL failed: '+str(result.findtext('./Tasks/Task/Result')))
+for attempt in range(40):
+    try:
+        call('/readyz')
+        break
+    except urllib.error.URLError:
+        if attempt==39: raise
+        time.sleep(0.25)
 for count in (0,8,10007):
     name=f'cpp_contract_{count}'
     values=','.join(f"({i},'value{i}')" for i in range(count))
@@ -52,3 +59,25 @@ sess=json.loads(call(base+'?'+urlencode({'downloads':'','partition':'ds=empty'})
 assert sess['RecordCount']==0
 call(base+'?'+urlencode({'downloadid':sess['DownloadID'],'partition':'ds=empty'}),'POST')
 print('existing empty partition: success rows=0',flush=True)
+
+if '--faults' in sys.argv:
+    base='/projects/test_project/tables/cpp_contract_8'
+    sess=json.loads(call(base+'?downloads','POST'))
+    path=base+'?'+urlencode({'downloadid':sess['DownloadID'],'data':'','arrow':'','rowrange':'(0,8)'})
+    try:
+        for effect in ('early_eof','crc_mismatch','malformed_arrow','empty_arrow_batch','oversized_arrow_batch'):
+            rule={'match':{'action':'read','table':'cpp_contract_8','format':'arrow'},'effect':{'type':effect,'rows':2},'times':1}
+            call('/__test/faults/cpp','PUT',json.dumps(rule).encode())
+            data=call(path)
+            with tempfile.NamedTemporaryFile() as f:
+                f.write(data);f.flush()
+                result=subprocess.run(['/probe/reader',f.name,'8'],capture_output=True,text=True,timeout=10)
+                assert result.returncode!=0, effect+' was silently accepted'
+                print(effect,'rejected exit='+str(result.returncode),flush=True)
+            # One-shot fault must not leak into the next request.
+            with tempfile.NamedTemporaryFile() as f:
+                f.write(call(path));f.flush()
+                subprocess.run(['/probe/reader',f.name,'8'],check=True,timeout=10)
+    finally:
+        call(base+'?'+urlencode({'downloadid':sess['DownloadID']}),'POST')
+        call('/__test/faults/cpp','DELETE')

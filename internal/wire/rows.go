@@ -149,7 +149,11 @@ func (e *encoder) value(t engine.Type, v any) error {
 	}
 	return nil
 }
-func Protobuf(r engine.Result) (out []byte, err error) {
+func Protobuf(r engine.Result) ([]byte, error) { return protobuf(r, true) }
+
+// ProtobufPrefix omits the stream trailer for row-boundary disconnect tests.
+func ProtobufPrefix(r engine.Result) ([]byte, error) { return protobuf(r, false) }
+func protobuf(r engine.Result, trailer bool) (out []byte, err error) {
 	defer func() {
 		if x := recover(); x != nil {
 			out = nil
@@ -176,6 +180,10 @@ func Protobuf(r engine.Result) (out []byte, err error) {
 		if len(e.b) > 64<<20 {
 			return nil, fmt.Errorf("ResourceLimit: response exceeds 64 MiB")
 		}
+	}
+	if !trailer {
+		// A partial next tag forces transport truncation instead of a clean EOF.
+		return append(e.b, 0x80), nil
 	}
 	e.u(33554430 << 3)
 	e.s(int64(len(r.Rows)))

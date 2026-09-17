@@ -1,0 +1,16 @@
+-- Synthetic compatibility fixtures; use with --seed examples/types.sql.
+CREATE TABLE e2e_types (
+ id BIGINT, ts TIMESTAMP_NTZ, d DATE, dt DATETIME,
+ amount DECIMAL(8,2), a ARRAY<BIGINT>, m MAP<STRING,BIGINT>,
+ nested STRUCT<x:STRUCT<y:BIGINT>>, mm MAP<STRING,MAP<STRING,BIGINT>>
+);
+INSERT INTO e2e_types VALUES
+ (-9223372036854775808,CAST('1969-12-31 23:59:59.123456789' AS TIMESTAMP_NTZ),CAST('1960-01-02' AS DATE),CAST('1969-12-31 23:59:59.123' AS DATETIME),12.345,ARRAY(1,2),MAP('key',3),NAMED_STRUCT('x',NAMED_STRUCT('y',7)),MAP('outer',MAP('inner',9))),
+ (9223372036854775807,NULL,NULL,NULL,-12.345,ARRAY(),MAP(),NULL,MAP()),
+ (0,NULL,NULL,NULL,NULL,NULL,NULL,NAMED_STRUCT('x',NULL),NULL);
+CREATE TABLE e2e_map_projection (keys ARRAY<STRING>, vals ARRAY<BIGINT>);
+INSERT INTO e2e_map_projection SELECT MAP_KEYS(m),MAP_VALUES(m) FROM e2e_types;
+-- ODPS BIGINT is signed. Model unsigned boundary values as DECIMAL, not a
+-- non-existent unsigned ODPS type. Casting 18446744073709551615 to BIGINT fails.
+CREATE TABLE e2e_unsigned_boundary (n DECIMAL(20,0));
+INSERT INTO e2e_unsigned_boundary VALUES(18446744073709551615);

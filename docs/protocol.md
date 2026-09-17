@@ -17,9 +17,9 @@
 | GET /projects/p、GET /projects/p/tables[/t] | Java SDK XML，Table.Schema 内嵌 JSON |
 | GET /readyz、/healthz、/capabilities | 就绪/版本/支持范围 JSON |
 
-HTTP 分区参数遵循 SDK 的 `ds=2026-09-14` 写法，也接受单引号值；SQL 中使用 `PARTITION(ds='2026-09-14')`。当前逗号是分区键分隔符，不支持分区值本身包含逗号。quotaName 回显而不执行配额调度，asyncmode 接受后同步建立快照。Protobuf 的 raw_size 参数不裁剪行数；当前 CPP 只在 Arrow 路径发送它。
+HTTP 分区参数遵循 SDK 的 `ds=2026-09-14` 写法，也接受单引号值；SQL 中使用 `PARTITION(ds='2026-09-14')`。当前逗号是分区键分隔符，不支持分区值本身包含逗号。quotaName 解析到 default 或显式配置的命名 quota；不存在的命名 quota 返回 404 QuotaNotExist，不执行生产配额调度，asyncmode 接受后同步建立快照。Protobuf 的 raw_size 参数不裁剪行数；当前 CPP 只在 Arrow 路径发送它。
 
-HTTP 4xx/5xx 按端点返回 JSON 或 XML Code/Message/RequestId；NoSuchTable/NoSuchDownload、InvalidPartition/InvalidParameter/InvalidColumn、InvalidCompression、UnsupportedOperation、ResourceLimit。签名不校验。超过并发入口容量返回 503 + Retry-After。
+HTTP 4xx/5xx 按端点返回 JSON 或 XML Code/Message/RequestId；NoSuchTable/NoSuchDownload、InvalidPartition/InvalidParameter/InvalidColumn、InvalidCompression、UnsupportedOperation、ResourceLimit。默认不校验签名；可选 strict 模式校验本地 ODPS v2/v4、STS、日期和 ACL，见 [可靠性配置](reliability.md)。超过并发入口容量返回 503 + Retry-After。
 
 ## 编码
 

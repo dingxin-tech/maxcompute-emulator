@@ -66,6 +66,57 @@ func render(ts []string) string {
 	r := []string{}
 	for i := 0; i < len(ts); i++ {
 		s := ts[i]
+		if word(s) == "map" && i+1 < len(ts) && ts[i+1] == "(" {
+			end, depth := i+2, 1
+			for end < len(ts) && depth > 0 {
+				if ts[end] == "(" {
+					depth++
+				}
+				if ts[end] == ")" {
+					depth--
+				}
+				if depth > 0 {
+					end++
+				}
+			}
+			if end >= len(ts) {
+				return "INVALID_MAP"
+			}
+			args := [][]string{}
+			begin, d := i+2, 0
+			for j := begin; j < end; j++ {
+				if ts[j] == "(" {
+					d++
+				}
+				if ts[j] == ")" {
+					d--
+				}
+				if ts[j] == "," && d == 0 {
+					args = append(args, ts[begin:j])
+					begin = j + 1
+				}
+			}
+			if begin < end {
+				args = append(args, ts[begin:end])
+			}
+			if len(args)%2 != 0 {
+				return "INVALID_MAP"
+			}
+			// Preserve the existing two-array constructor extension.
+			if len(args) == 2 && len(args[0]) > 1 && len(args[1]) > 1 && word(args[0][0]) == "array" && word(args[1][0]) == "array" {
+				r = append(r, "map("+render(args[0])+","+render(args[1])+")")
+				i = end
+				continue
+			}
+			keys, values := []string{}, []string{}
+			for j := 0; j < len(args); j += 2 {
+				keys = append(keys, render(args[j]))
+				values = append(values, render(args[j+1]))
+			}
+			r = append(r, "map(list_value("+strings.Join(keys, ",")+"),list_value("+strings.Join(values, ",")+"))")
+			i = end
+			continue
+		}
 		if word(s) == "named_struct" && i+1 < len(ts) && ts[i+1] == "(" {
 			end := i + 2
 			depth := 1

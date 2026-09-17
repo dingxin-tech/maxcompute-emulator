@@ -166,3 +166,23 @@ func arrowEncode(r engine.Result, batchRows int, tunnel bool, encoding string) (
 	}
 	return buf.Bytes(), nil
 }
+
+// EmptyTunnelArrow emits an actual zero-row IPC batch for opt-in fault tests.
+func EmptyTunnelArrow(r engine.Result) ([]byte, error) {
+	fields := make([]arrow.Field, len(r.Columns))
+	for i, c := range r.Columns {
+		fields[i] = arrow.Field{Name: c.Name, Type: c.Parsed.Arrow(), Nullable: true}
+	}
+	b := array.NewRecordBuilder(memory.DefaultAllocator, arrow.NewSchema(fields, nil))
+	defer b.Release()
+	rec := b.NewRecordBatch()
+	defer rec.Release()
+	p, e := ipc.GetRecordBatchPayload(rec)
+	if e != nil {
+		return nil, e
+	}
+	defer p.Release()
+	var buf bytes.Buffer
+	_, e = p.WritePayload(&buf)
+	return ArrowChunk(buf.Bytes()), e
+}
