@@ -26,7 +26,7 @@ import (
 	"github.com/pierrec/lz4/v4"
 )
 
-const Version = "1.0.0"
+const Version = "1.1.0"
 
 type Config struct {
 	Project        string

@@ -1,4 +1,10 @@
-# 1.0.0 兼容范围
+# 1.1.0 兼容范围
+
+1.1.0 增加P0协议修复、JSON日志、12类测试故障、命名quota、可选strict鉴权和SQL类型fixture，配置见 [reliability.md](reliability.md)。Go race/vet、Java SDK 33项与C++ Arrow wire正反例已验证；完整CK runner及真实MaxCompute鉴权/配额仍需独立验收。
+
+以下保留1.0.0数据面与Flink范围；1.1.0未扩大Volume/Blob/CDC或checkpoint恢复承诺。
+
+## 1.0.0 数据面基线
 
 1.0.0 是 Go + DuckDB 实现的首个社区版本。旧 Spring Boot/SQLite 实现保留在 legacy；本版不是所有旧功能和数据文件的无损替换。
 

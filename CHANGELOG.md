@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 — 2026-09-17
 
 - Add JSON Tunnel lifecycle logs with per-process session hashes and requested ranges.
 - Add opt-in, expiring protocol faults for retries, cancellation, corrupt streams and finalization.

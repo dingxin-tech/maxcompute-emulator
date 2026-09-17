@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS runtime
-LABEL org.opencontainers.image.version="1.0.0"
+LABEL org.opencontainers.image.version="1.1.0"
 # The pinned bookworm base already provides libstdc++6 and libgcc_s.
 RUN test -e /usr/lib/$(uname -m)-linux-gnu/libstdc++.so.6 \
     && mkdir /data && chown 65532:65532 /data
 COPY LICENSE NOTICE docs/third-party-licenses.txt /usr/share/licenses/emulator/
-COPY examples/seed.sql /opt/emulator/seed.sql
+COPY examples/seed.sql examples/types.sql /opt/emulator/
 USER 65532:65532
 WORKDIR /data
 EXPOSE 8080

@@ -19,11 +19,11 @@ within one process; logs omit raw session IDs, query strings and credentials.
 For Docker, explicitly opt into a test network and bind the host port locally:
 
 ```sh
-docker run --rm -p 127.0.0.1:8080:8080 maxcompute-emulator:reliability-candidate \
+docker run --rm -p 127.0.0.1:8080:8080 maxcompute/maxcompute-emulator:1.1.0 \
   --listen 0.0.0.0:8080 --test-mode --test-network --quotas named
 ```
 
-Use a candidate containing this change until a release is published. Without
+Without
 `--test-network`, test mode requires a numeric loopback listen address.
 `/__test` returns 404 unless test mode is enabled. These management endpoints
 are unauthenticated and must be confined to your test network.
@@ -95,7 +95,7 @@ Mount a JSON file of **invented test credentials** and select strict mode:
 
 ```sh
 docker run --rm -p 127.0.0.1:8080:8080 \
-  -v "$PWD/auth.json:/tmp/auth.json:ro" maxcompute-emulator:reliability-candidate \
+  -v "$PWD/auth.json:/tmp/auth.json:ro" maxcompute/maxcompute-emulator:1.1.0 \
   --listen 0.0.0.0:8080 --auth-mode strict --auth-config /tmp/auth.json
 ```
 
@@ -111,7 +111,8 @@ validation. Keep real MaxCompute authentication and quota gates.
 
 ## Type fixtures
 
-[examples/types.sql](../examples/types.sql) uses public SQL to create nanosecond
+[examples/types.sql](../examples/types.sql), bundled as `/opt/emulator/types.sql`
+(use `--seed /opt/emulator/types.sql`), uses public SQL to create nanosecond
 TIMESTAMP_NTZ, pre-1970 DATE/DATETIME, signed BIGINT limits, decimal rounding,
 NULL/empty arrays/maps, nested structs/maps and independent MAP_KEYS/MAP_VALUES
 projection tables. MAP accepts alternating keys/values; the earlier two-ARRAY

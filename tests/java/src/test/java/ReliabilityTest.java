@@ -27,7 +27,7 @@ public class ReliabilityTest {
     container =
         new GenericContainer<>(
                 DockerImageName.parse(
-                    System.getProperty("emulator.image", "maxcompute-emulator:1.0.0")))
+                    System.getProperty("emulator.image", "maxcompute/maxcompute-emulator:1.1.0")))
             .withCopyToContainer(
                 Transferable.of(config.getBytes(StandardCharsets.UTF_8), 0444), "/tmp/auth.json")
             .withCommand(

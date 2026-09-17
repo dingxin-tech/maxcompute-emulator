@@ -30,7 +30,7 @@ public class EmulatorTest {
       container =
           new GenericContainer<>(
                   DockerImageName.parse(
-                      System.getProperty("emulator.image", "maxcompute-emulator:1.0.0")))
+                      System.getProperty("emulator.image", "maxcompute/maxcompute-emulator:1.1.0")))
               .withExposedPorts(8080)
               .waitingFor(Wait.forHttp("/readyz"));
       container.start();

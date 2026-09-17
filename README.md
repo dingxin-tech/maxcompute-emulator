@@ -2,7 +2,7 @@
 
 [简体中文](README.zh-CN.md) · [Docker Hub](https://hub.docker.com/r/maxcompute/maxcompute-emulator) · [Compatibility](docs/release-readiness.md) · [Changelog](CHANGELOG.md)
 
-Run a local MaxCompute-compatible service for SDK development and integration tests. Version **1.0.0** is a Go + DuckDB rewrite with SQL fixtures, table and partition metadata, Tunnel Protobuf/Arrow transfers, and Storage API v2.
+Run a local MaxCompute-compatible service for SDK development and integration tests. Version **1.1.0** is a Go + DuckDB rewrite with SQL fixtures, table and partition metadata, Tunnel Protobuf/Arrow transfers, and Storage API v2.
 
 `main` contains the Go implementation. The previous Spring Boot + SQLite implementation is preserved on [`legacy`](https://github.com/dingxin-tech/maxcompute-emulator/tree/legacy); its existing image tags remain available.
 
@@ -11,16 +11,16 @@ Run a local MaxCompute-compatible service for SDK development and integration te
 Docker images target **Linux amd64**. On Apple Silicon, use Docker's amd64 emulation.
 
 ```bash
-docker pull maxcompute/maxcompute-emulator:1.0.0
+docker pull maxcompute/maxcompute-emulator:1.1.0
 docker run --rm --name mc-emulator --platform linux/amd64 \
-  -p 127.0.0.1:8080:8080 maxcompute/maxcompute-emulator:1.0.0 \
+  -p 127.0.0.1:8080:8080 maxcompute/maxcompute-emulator:1.1.0 \
   --listen 0.0.0.0:8080 --seed /opt/emulator/seed.sql
 curl -fsS http://127.0.0.1:8080/readyz
 ```
 
 Use `http://127.0.0.1:8080` for both the ODPS endpoint and Tunnel endpoint, project `test_project`, schema `default`, and dummy credentials such as `test-ak` / `test-sk`. The seed creates `demo` and partitioned `events` tables. Omit `--seed` to start empty.
 
-Pin `1.0.0` for reproducible tests. `latest` follows stable releases and may change.
+Pin `1.1.0` for reproducible tests. `latest` follows stable releases and may change.
 
 ## Java SDK and Testcontainers
 
@@ -28,7 +28,7 @@ Use `com.aliyun.odps:odps-sdk-core:0.61.2-public` and Testcontainers. A complete
 
 ```java
 try (GenericContainer<?> mc = new GenericContainer<>(
-        DockerImageName.parse("maxcompute/maxcompute-emulator:1.0.0"))
+        DockerImageName.parse("maxcompute/maxcompute-emulator:1.1.0"))
         .withExposedPorts(8080)
         .waitingFor(Wait.forHttp("/readyz"))) {
     mc.start();
@@ -54,7 +54,7 @@ With JDK 17, Maven and Docker installed:
 
 ```bash
 mvn -B -f tests/java/pom.xml \
-  -Demulator.image=maxcompute/maxcompute-emulator:1.0.0 test
+  -Demulator.image=maxcompute/maxcompute-emulator:1.1.0 test
 ```
 
 Arrow on JDK 17 requires `--add-opens=java.base/java.nio=ALL-UNNAMED`; the test POM sets it. Both endpoints must use the mapped port. Between containers on one Docker network, use the emulator's container DNS name instead of `localhost`.

@@ -1,6 +1,6 @@
 # MaxCompute Emulator
 
-Go + DuckDB 实现的本地 MaxCompute 测试服务。**1.0.0** 支持 ClickHouse 当前 ODPS-CPP Tunnel 读表，以及 Java SDK 的 Tunnel 批量/流式上传、Upsert、实例结果下载、Storage API 批量/流式 Arrow 读写。[English](README.md) · [发布评审与元数据/Flink 支持范围](docs/release-readiness.md)。支持矩阵和回归用例见 [docs/data-transfer.md](docs/data-transfer.md)。
+Go + DuckDB 实现的本地 MaxCompute 测试服务。**1.1.0** 支持 ClickHouse 当前 ODPS-CPP Tunnel 读表，以及 Java SDK 的 Tunnel 批量/流式上传、Upsert、实例结果下载、Storage API 批量/流式 Arrow 读写。[English](README.md) · [发布评审与元数据/Flink 支持范围](docs/release-readiness.md)。支持矩阵和回归用例见 [docs/data-transfer.md](docs/data-transfer.md)。
 
 `main` 为 Go 实现，原 Spring Boot/SQLite 版本保留在 [`legacy`](https://github.com/dingxin-tech/maxcompute-emulator/tree/legacy)。Storage v1 和分布式事务尚未实现。默认接受测试 AK/SK；可选 strict 模式检查本地测试凭据的签名、STS、日期和读写权限，适用于本地与 CI 测试环境。
 
@@ -9,9 +9,9 @@ Go + DuckDB 实现的本地 MaxCompute 测试服务。**1.0.0** 支持 ClickHous
 交付包中的镜像为 Linux amd64；Apple Silicon 通过 Docker 的 amd64 模拟运行。
 
 ```bash
-docker pull maxcompute/maxcompute-emulator:1.0.0
+docker pull maxcompute/maxcompute-emulator:1.1.0
 docker run --rm --name mc-emulator --platform linux/amd64 \
-  -p 127.0.0.1:8080:8080 maxcompute/maxcompute-emulator:1.0.0 \
+  -p 127.0.0.1:8080:8080 maxcompute/maxcompute-emulator:1.1.0 \
   --listen 0.0.0.0:8080 --seed /opt/emulator/seed.sql
 curl -fsS http://127.0.0.1:8080/readyz
 ```
@@ -29,7 +29,7 @@ curl -fsS http://127.0.0.1:8080/readyz
 ```bash
 docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 \
   -v "$PWD/fixtures.sql:/fixtures.sql:ro" \
-  maxcompute/maxcompute-emulator:1.0.0 \
+  maxcompute/maxcompute-emulator:1.1.0 \
   --listen 0.0.0.0:8080 --seed /fixtures.sql --project test_project
 ```
 
@@ -43,11 +43,11 @@ docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 \
 mvn -B -f tests/java/pom.xml test
 ```
 
-默认通过 Testcontainers 启动本地 `maxcompute/maxcompute-emulator:1.0.0`，动态分配端口，等待 `/readyz`，运行后销毁容器。可指定 `-Demulator.image=自定义镜像名:版本`；验证已启动服务用 `-Demulator.endpoint=http://127.0.0.1:8080`。
+默认通过 Testcontainers 启动本地 `maxcompute/maxcompute-emulator:1.1.0`，动态分配端口，等待 `/readyz`，运行后销毁容器。可指定 `-Demulator.image=自定义镜像名:版本`；验证已启动服务用 `-Demulator.endpoint=http://127.0.0.1:8080`。
 
 ```java
 try (GenericContainer<?> mc = new GenericContainer<>(
-        DockerImageName.parse("maxcompute/maxcompute-emulator:1.0.0"))
+        DockerImageName.parse("maxcompute/maxcompute-emulator:1.1.0"))
         .withExposedPorts(8080)
         .waitingFor(Wait.forHttp("/readyz"))) {
     mc.start();
@@ -109,7 +109,7 @@ go test ./...
 go run ./cmd/emulator --seed examples/seed.sql
 
 # 标准 Linux Docker 源码构建（CGO 开启）
-docker build --platform linux/amd64 -t maxcompute/maxcompute-emulator:1.0.0 .
+docker build --platform linux/amd64 -t maxcompute/maxcompute-emulator:1.1.0 .
 
 # 镜像加载/构建后，真实 Java SDK 容器验收
 mvn -B -f tests/java/pom.xml test

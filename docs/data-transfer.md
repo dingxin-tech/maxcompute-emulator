@@ -1,6 +1,6 @@
 # 数据传输与 SDK 验收
 
-1.0.0 的范围是表与 SQL 实例的数据传输。鉴权、云端存储调度、Volume、Blob 和 CDC 不在此版本中；不支持的 Action/增量或过滤读取返回错误。
+1.0.0 的范围是表与 SQL 实例的数据传输。生产鉴权、云端存储调度、Volume、Blob 和 CDC 不在此版本中；不支持的 Action/增量或过滤读取返回错误。
 
 ## 支持矩阵
 
@@ -77,3 +77,5 @@ try (var client = MaxStorageClient.builder()
 Go HTTP 测试进一步覆盖损坏 CRC、截断 payload、错 schema、跨表会话、重试内容冲突、offset 跳跃、未关闭 stream 提交、提交后写入，以及复杂类型 NULL/二进制和失败事务回滚。`go test -race ./...` 检查并发访问。Testcontainers 使用真正的 Linux amd64 Docker 镜像运行同一组 Java SDK 用例。
 
 静态检查：`go vet -unreachable=false ./...`；ANTLR 4.13.2 生成的 parser 含工具固定生成的不可达语句，默认 vet 会报告这些存量警告，未手工修改生成代码。
+
+1.1.0 的本地 strict 鉴权、quota 和故障控制见 [reliability.md](reliability.md)。
