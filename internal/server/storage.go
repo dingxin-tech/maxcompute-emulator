@@ -74,10 +74,16 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 6 && parts[0] == "projects" && parts[2] == "schemas" && parts[4] == "tables" {
 		p, sc, t = parts[1], parts[3], parts[5]
 	} else if len(parts) == 4 && parts[0] == "projects" && parts[2] == "instances" {
+		if !s.checkProject(w, r, parts[1]) {
+			return
+		}
 		s.storageInstance(w, r, parts[1], parts[3])
 		return
 	} else {
 		bad(400, "InvalidParameter", fmt.Errorf("invalid Target"))
+		return
+	}
+	if !s.checkProject(w, r, p) {
 		return
 	}
 	req := storageRequest{}

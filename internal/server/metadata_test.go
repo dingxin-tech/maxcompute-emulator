@@ -28,7 +28,7 @@ func TestMetadataPaginationAndIsolation(t *testing.T) {
 		{"/projects/p/tables?name=a&maxitems=1&marker=aa", "<Name>ab</Name>", "<Name>zz</Name>", 200},
 		{"/projects/p/tables/aa?partitions&maxitems=1", "Value=\"a\"", "Value=\"b\"", 200},
 		{"/projects/p/tables/aa?partition=ds%3D%27missing%27", "NoSuchPartition", "<Schema>", 404},
-		{"/projects/other/tables", "<Tables>", "<Name>aa</Name>", 200},
+		{"/projects/other/tables", "NoSuchProject", "<Name>aa</Name>", 404},
 	} {
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Correct Tunnel Arrow ZSTD/LZ4 compression to use IPC buffers, preserving Tunnel CRC framing.
+- Reject missing projects and missing download partitions with distinct 404 codes; keep empty partitions valid.
+- Return `InvalidPartitionSpec` for invalid download partition specifications.
+- Add Go, Java SDK and pinned public C++ SDK wire contract regression tests.
+
+
 ## 1.0.0 — 2026-09-14
 
 - Replace the Spring Boot/SQLite server with Go, DuckDB and a public ODPS grammar.

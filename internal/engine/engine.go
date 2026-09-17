@@ -26,7 +26,7 @@ func Open(path string, maxRows int) (*Engine, error) {
 		return nil, e
 	}
 	db.SetMaxOpenConns(1)
-	for _, q := range []string{"SET memory_limit='512MB'", "SET threads=2", "SET enable_external_access=false", "CREATE TABLE IF NOT EXISTS main.emulator_catalog(namespace VARCHAR, name VARCHAR, definition VARCHAR, PRIMARY KEY(namespace,name))"} {
+	for _, q := range []string{"SET memory_limit='512MB'", "SET threads=2", "SET enable_external_access=false", "CREATE TABLE IF NOT EXISTS main.emulator_projects(name VARCHAR PRIMARY KEY)", "CREATE TABLE IF NOT EXISTS main.emulator_catalog(namespace VARCHAR, name VARCHAR, definition VARCHAR, PRIMARY KEY(namespace,name))"} {
 		if _, e = db.Exec(q); e != nil {
 			db.Close()
 			return nil, e
@@ -135,6 +135,9 @@ func (e *Engine) Execute(ctx context.Context, p, s, sqlText string) (Result, err
 			return Result{}, err
 		}
 	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO main.emulator_projects VALUES (?) ON CONFLICT DO NOTHING", p); err != nil {
+		return Result{}, err
+	}
 	return result, tx.Commit()
 }
 func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (Result, error) {
@@ -144,7 +147,7 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 	}
 	for _, token := range ts {
 		w := word(token)
-		if w == "main" || w == "emulator_catalog" || w == "information_schema" || w == "pg_catalog" || strings.HasPrefix(w, "n_") || strings.HasPrefix(w, "duckdb_") || strings.HasPrefix(w, "pragma_") || w == "query" || w == "query_table" {
+		if w == "main" || w == "emulator_catalog" || w == "emulator_projects" || w == "information_schema" || w == "pg_catalog" || strings.HasPrefix(w, "n_") || strings.HasPrefix(w, "duckdb_") || strings.HasPrefix(w, "pragma_") || w == "query" || w == "query_table" {
 			return none, fmt.Errorf("UnsupportedFeature: reserved database namespace or function")
 		}
 		switch w {
@@ -487,6 +490,29 @@ func (e *Engine) Snapshot(ctx context.Context, p, s, name string, part map[strin
 		where = append(where, Quote(c.Name)+"=CAST(? AS "+c.Parsed.Duck()+")")
 		args = append(args, v)
 	}
+	if len(part) > 0 {
+		parts, err := partitionList(ctx, tx, t)
+		if err != nil {
+			return Result{}, t, err
+		}
+		found := false
+		for _, existing := range parts {
+			match := true
+			for k, v := range part {
+				if existing[k] != v {
+					match = false
+					break
+				}
+			}
+			if match {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return Result{}, t, fmt.Errorf("NoSuchPartition: The specified partition does not exist.")
+		}
+	}
 	q := "SELECT " + strings.Join(columns, ",") + " FROM " + Quote(t.Name)
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
@@ -569,4 +595,13 @@ func normalize(v any) (any, int64) {
 	default:
 		return v, 32
 	}
+}
+
+// HasProject includes projects provisioned by successful fixture execution.
+func (e *Engine) HasProject(ctx context.Context, project string) (bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var found bool
+	err := e.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM main.emulator_projects WHERE name=?)", project).Scan(&found)
+	return found, err
 }

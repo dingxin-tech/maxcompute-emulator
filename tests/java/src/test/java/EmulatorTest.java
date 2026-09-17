@@ -823,4 +823,22 @@ public class EmulatorTest {
               .getRecordCount());
     }
   }
+
+  @Test
+  void missingProjectPartitionAndEmptyPartitionCodes() throws Exception {
+    String name = table();
+    sql("create table " + name + "(id bigint) partitioned by(ds string)");
+    sql("alter table " + name + " add partition(ds='empty')");
+    com.aliyun.odps.tunnel.TunnelException missing = assertThrows(
+        com.aliyun.odps.tunnel.TunnelException.class,
+        () -> tunnel().createDownloadSession("test_project", name, new PartitionSpec("ds=missing")));
+    assertEquals("NoSuchPartition", missing.getErrorCode());
+    assertNotNull(missing.getRequestId());
+    assertEquals(0, tunnel().createDownloadSession("test_project", name, new PartitionSpec("ds=empty")).getRecordCount());
+    com.aliyun.odps.tunnel.TunnelException project = assertThrows(
+        com.aliyun.odps.tunnel.TunnelException.class,
+        () -> tunnel().createDownloadSession("no_such_project", name));
+    assertEquals("NoSuchProject", project.getErrorCode());
+    assertNotNull(project.getRequestId());
+  }
 }

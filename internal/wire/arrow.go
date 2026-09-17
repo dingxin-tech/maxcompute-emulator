@@ -85,7 +85,15 @@ func appendValue(b array.Builder, t engine.Type, v any) error {
 	}
 	return nil
 }
-func Arrow(r engine.Result, batchRows int, tunnel bool) (out []byte, err error) {
+func Arrow(r engine.Result, batchRows int, tunnel bool) ([]byte, error) {
+	return arrowEncode(r, batchRows, tunnel, "")
+}
+
+// TunnelArrow compresses IPC buffers, preserving the outer Tunnel CRC framing.
+func TunnelArrow(r engine.Result, batchRows int, encoding string) ([]byte, error) {
+	return arrowEncode(r, batchRows, true, encoding)
+}
+func arrowEncode(r engine.Result, batchRows int, tunnel bool, encoding string) (out []byte, err error) {
 	defer func() {
 		if x := recover(); x != nil {
 			out = nil
@@ -126,7 +134,14 @@ func Arrow(r engine.Result, batchRows int, tunnel bool) (out []byte, err error) 
 		rec := b.NewRecordBatch()
 		b.Release()
 		if tunnel {
-			payload, e := ipc.GetRecordBatchPayload(rec)
+			opts := []ipc.Option{}
+			switch encoding {
+			case "zstd":
+				opts = append(opts, ipc.WithZstd())
+			case "lz4_frame", "x-lz4-frame":
+				opts = append(opts, ipc.WithLZ4())
+			}
+			payload, e := ipc.GetRecordBatchPayload(rec, opts...)
 			if e == nil {
 				_, e = payload.WritePayload(&buf)
 				payload.Release()

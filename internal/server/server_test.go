@@ -18,8 +18,8 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/dingxin-tech/maxcompute-emulator/internal/engine"
-	"github.com/klauspost/compress/zstd"
-	"github.com/pierrec/lz4/v4"
+	"github.com/dingxin-tech/maxcompute-emulator/internal/wire"
+	"reflect"
 )
 
 func fixture(t *testing.T, c Config) (*Server, *httptest.Server) {
@@ -128,29 +128,18 @@ func TestArrowCompressionChunkCRCAndRawLimit(t *testing.T) {
 		t.Fatal("fixture must span chunks")
 	}
 	unchunk(t, raw)
-	for _, alg := range []string{"zstd", "lz4_frame"} {
+	for _, alg := range []string{"zstd", "lz4_frame", "x-lz4-frame"} {
 		code, head, b := request(t, h, "GET", path, alg)
 		if code != 200 || head.Get("Content-Encoding") != alg {
 			t.Fatalf("%d %v", code, head)
 		}
-		var got []byte
-		var err error
-		if alg == "zstd" {
-			r, e := zstd.NewReader(bytes.NewReader(b))
-			if e != nil {
-				t.Fatal(e)
-			}
-			got, err = io.ReadAll(r)
-			r.Close()
-		} else {
-			got, err = io.ReadAll(lz4.NewReader(bytes.NewReader(b)))
+		cols := []engine.Column{{Name: "id", Type: "bigint", Parsed: engine.Type{Name: "bigint"}}, {Name: "s", Type: "string", Parsed: engine.Type{Name: "string"}}}
+		got, err := wire.DecodeArrow(b, cols, true)
+		want, wantErr := wire.DecodeArrow(raw, cols, true)
+		if err != nil || wantErr != nil || !reflect.DeepEqual(got.Rows, want.Rows) {
+			t.Fatalf("%s IPC decode: %v / %v rows=%d", alg, err, wantErr, len(got.Rows))
 		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(raw, got) {
-			t.Fatalf("%s changes payload", alg)
-		}
+
 	}
 	code, head, small := request(t, h, "GET", path+"&raw_size=2000", "")
 	if code != 200 || len(small) >= len(raw) || head.Get("Last-Modified") != header.Get("Last-Modified") {
@@ -210,5 +199,127 @@ func TestSessionExpiry(t *testing.T) {
 	code, _, _ := request(t, h, "GET", "/projects/p/tables/t?downloadid="+id, "")
 	if code != 404 {
 		t.Fatal(code)
+	}
+}
+
+func TestMissingProjectAndPartitionContracts(t *testing.T) {
+	s, h := fixture(t, Config{})
+	for _, path := range []string{"/projects/missing", "/projects/missing/tunnel", "/projects/missing/tables/t", "/projects/missing/tables/t?downloads", "/projects/missing/tables/t?downloadid=missing", "/projects/missing/instances"} {
+		method := "GET"
+		if strings.Contains(path, "downloads") || strings.HasSuffix(path, "instances") {
+			method = "POST"
+		}
+		code, head, b := request(t, h, method, path, "")
+		if code != 404 || !strings.Contains(string(b), "NoSuchProject") || head.Get("x-odps-request-id") == "" {
+			t.Errorf("%s: %d %s", path, code, b)
+		}
+	}
+	_, err := s.Engine.Execute(context.Background(), "p", "default", "create table pt(id bigint) partitioned by (ds string);alter table pt add partition(ds='empty')")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		part   string
+		status int
+		code   string
+	}{{"ds=missing", 404, "NoSuchPartition"}, {"other=x", 400, "InvalidPartitionSpec"}, {"", 400, "InvalidPartitionSpec"}, {"ds=empty", 200, "RecordCount"}} {
+		code, head, b := request(t, h, "POST", "/projects/p/tables/pt?downloads&partition="+tc.part, "")
+		if code != tc.status || !strings.Contains(string(b), tc.code) || head.Get("x-odps-request-id") == "" {
+			t.Errorf("%s: %d %s", tc.part, code, b)
+		}
+	}
+	if len(s.sessions) != 1 {
+		t.Fatalf("failed requests allocated sessions: %d", len(s.sessions))
+	}
+	code, _, b := request(t, h, "POST", "/projects/p/tables/missing?downloads", "")
+	if code != 404 || !strings.Contains(string(b), "NoSuchTable") {
+		t.Fatalf("%d %s", code, b)
+	}
+}
+
+func TestArrowIPCRangesAndMultipleBatches(t *testing.T) {
+	s, h := fixture(t, Config{})
+	_, err := s.Engine.Execute(context.Background(), "p", "default", "create table many(id bigint,s string);insert into many select i, 'v' from range(9000) t(i);create table empty(id bigint,s string)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cols := []engine.Column{{Name: "id", Type: "bigint", Parsed: engine.Type{Name: "bigint"}}, {Name: "s", Type: "string", Parsed: engine.Type{Name: "string"}}}
+	for _, tc := range []struct {
+		table                 string
+		start, count, batches int
+	}{{"t", 0, 8, 1}, {"many", 0, 9000, 3}, {"empty", 0, 0, 0}, {"many", 3, 0, 0}} {
+		code, _, b := request(t, h, "POST", "/projects/p/tables/"+tc.table+"?downloads", "")
+		if code != 200 {
+			t.Fatalf("%d %s", code, b)
+		}
+		var sess map[string]any
+		if err := json.Unmarshal(b, &sess); err != nil {
+			t.Fatal(err)
+		}
+		for _, alg := range []string{"identity", "zstd", "lz4_frame"} {
+			path := fmt.Sprintf("/projects/p/tables/%s?downloadid=%s&data&arrow&rowrange=(%d,%d)", tc.table, sess["DownloadID"], tc.start, tc.count)
+			code, _, b = request(t, h, "GET", path, alg)
+			if code != 200 {
+				t.Fatalf("%s: %d %s", alg, code, b)
+			}
+			got, err := wire.DecodeArrow(b, cols, true)
+			if err != nil || len(got.Rows) != tc.count {
+				t.Fatalf("%s %s rows=%d: %v", tc.table, alg, len(got.Rows), err)
+			}
+			for i, row := range got.Rows {
+				if row[0] != int64(tc.start+i) {
+					t.Fatalf("out of order or duplicate: %v", row)
+				}
+			}
+			raw, err := wire.Unchunk(b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reader := ipc.NewMessageReader(bytes.NewReader(raw))
+			batches := 0
+			for {
+				msg, err := reader.Message()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if msg.Type() != ipc.MessageRecordBatch {
+					t.Fatal(msg.Type())
+				}
+				batches++
+			}
+			reader.Release()
+			if batches != tc.batches {
+				t.Fatalf("%s %s batches=%d", tc.table, alg, batches)
+			}
+		}
+	}
+}
+
+func TestConfiguredEmptyProjectAndStorageProjectErrors(t *testing.T) {
+	e, err := engine.Open("", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	s := New(e, Config{Project: "custom"})
+	h := httptest.NewServer(s)
+	defer h.Close()
+	for _, p := range []string{"/projects/custom", "/projects/custom/tunnel", "/projects/custom/tables"} {
+		code, _, b := request(t, h, "GET", p, "")
+		if code != 200 {
+			t.Fatalf("%s: %d %s", p, code, b)
+		}
+	}
+	for _, target := range []string{"projects.missing.schemas.default.tables.t", "projects.missing.instances.i"} {
+		code, head, b := request(t, h, "POST", "/api/storage/v2?Action=TableCreateReadSession&Target="+target, "")
+		if code != 404 || !strings.Contains(string(b), "NoSuchProject") || head.Get("x-odps-request-id") == "" {
+			t.Fatalf("%d %s", code, b)
+		}
+	}
+	if len(s.sessions) != 0 || len(s.storage) != 0 {
+		t.Fatal("missing project created session")
 	}
 }

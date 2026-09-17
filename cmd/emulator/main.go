@@ -42,7 +42,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	s := &http.Server{Addr: *listen, Handler: server.New(e, server.Config{PublicEndpoint: *public, SessionTTL: *ttl, MaxSessions: *maxSessions}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
+	s := &http.Server{Addr: *listen, Handler: server.New(e, server.Config{Project: *project, PublicEndpoint: *public, SessionTTL: *ttl, MaxSessions: *maxSessions}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(done)

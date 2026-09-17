@@ -10,7 +10,7 @@
 | POST /projects/p/tables/t?downloads | JSON DownloadID/RecordCount/Status/Owner/Initiated/Schema/QuotaName，立即 normal |
 | GET /projects/p/tables/t?downloadid=id | 同创建响应；绑定 project/schema/table/partition |
 | GET 同路径 &data&rowrange=(start,count) | Protobuf，支持 columns 重排、范围截取 |
-| GET 同路径再加 &arrow | 单个 Arrow RecordBatch，支持 raw_size 软限额 |
+| GET 同路径再加 &arrow | Arrow RecordBatch，支持 raw_size 软限额 |
 | POST /projects/p/tables/t?downloadid=id | 200，释放快照；再次读取 404 NoSuchDownload |
 | POST /projects/p/instances | Java SDK XML SQLTask；201 + Location；执行同步完成 |
 | GET /projects/p/instances/id（taskstatus/result/source） | Java SDK XML 状态/结果，失败 Task 状态 Failed |
@@ -25,7 +25,7 @@ HTTP 4xx/5xx 按端点返回 JSON 或 XML Code/Message/RequestId；NoSuchTable/N
 
 Protobuf 按 public SDK 的列序编码，NULL 不写字段。记录结束 tag 33553408 后写 CRC32C，流尾 meta-count 33554430 与 checksum-of-checksums 33554431；CRC 数值按小端逻辑值更新，不包含传输长度和 NULL 标记。DATE 为天数，DATETIME 为毫秒，TIMESTAMP 为秒+纳秒，DECIMAL 为十进制文本。MAP 在引擎边界从 DuckDB OrderedMap 转换，ARRAY/STRUCT 递归编码。
 
-Tunnel Arrow 不是普通带 Schema 消息的 IPC stream：客户端从会话元数据构造 schema，服务端只发送 RecordBatch payload。帧头为大端 chunk size（65536），每满块追加 CRC32C，最后追加全流 CRC32C。压缩包裹整个 Tunnel 帧。空表返回空数据帧。Arrow 单响应最多一批，CPP BufferArrowRecordReader 按实际行数推进；raw_size 过小时仍返回至少一行，以保证进度。
+Tunnel Arrow 不是普通带 Schema 消息的 IPC stream：客户端从会话元数据构造 schema，服务端只发送 RecordBatch payload。帧头为大端 chunk size（65536），每满块追加 CRC32C，最后追加全流 CRC32C。ZSTD 和 LZ4 frame 压缩 Arrow IPC buffer，外层 Tunnel CRC 帧保持未压缩；deflate 仍包裹整个 Tunnel 帧。空表和 count=0 返回合法空数据帧。常规 Arrow 请求每批最多4096行；带 raw_size 的请求最多一批，CPP BufferArrowRecordReader 按实际行数推进；raw_size 过小时仍返回至少一行，以保证进度。
 
 ## 公开源码依据
 
@@ -57,3 +57,7 @@ Table Target 格式 `projects.p.schemas.s.tables.t`；Instance Target `projects.
 Tunnel 写入解码完整校验后才暂存或发布；MAP 校验保留发送顺序。数据写入通过 DuckDB 事务，复杂值递归生成绑定表达式，避免驱动对 NULL 数组直接绑定的限制。所有用户数据仍走参数绑定。
 
 Stream/Upsert 使用 SDK retry trace-id 识别同次重试，内容不一致返回409。Storage ExactlyOnceMode 校验 RowOffset 连续性，并校验同 offset 重放的内容，返回 ExactlyOnceRowOffset。BatchCompatible 返回带 BlockNumber/AttemptNumber/WriterStats 的 JSON CommitMessage，只接受本会话最新 attempt 的令牌；批量 commit 原子发布。
+
+## 项目与缺失分区
+
+`--project`（默认 test_project）配置一个可用的空项目；成功执行的本地 SQL fixture 项目会记录在数据库中。HTTP 请求不会自动创建任意项目，未知项目返回404 NoSuchProject。迁移1.0.0数据库时沿用原 --project 参数（旧表目录只含不可逆namespace哈希）。完整但不存在的分区在下载创建时返回404 NoSuchPartition；已有空分区返回0行会话；不完整/不匹配的spec返回400 InvalidPartitionSpec。合法项目下不存在的download ID仍返回NoSuchDownload，不能一律改成分区错误。

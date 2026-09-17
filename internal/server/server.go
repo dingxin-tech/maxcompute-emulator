@@ -29,6 +29,7 @@ import (
 const Version = "1.0.0"
 
 type Config struct {
+	Project        string
 	SessionTTL     time.Duration
 	MaxSessions    int
 	PublicEndpoint string
@@ -57,6 +58,9 @@ type Server struct {
 }
 
 func New(e *engine.Engine, c Config) *Server {
+	if c.Project == "" {
+		c.Project = "test_project"
+	}
 	if c.SessionTTL == 0 {
 		c.SessionTTL = 30 * time.Minute
 	}
@@ -160,6 +164,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	project := parts[1]
+	if !s.checkProject(w, r, project) {
+		return
+	}
 	schema := r.URL.Query().Get("curr_schema")
 	if schema == "" {
 		schema = "default"
@@ -399,14 +406,20 @@ func (s *Server) publishInstance(i *instance) {
 func (s *Server) createDownload(w http.ResponseWriter, r *http.Request, p, sc, t string) {
 	part, err := engine.ParsePartition(r.URL.Query().Get("partition"))
 	if err != nil {
-		fail(w, r, 400, "InvalidPartition", err)
+		fail(w, r, 400, "InvalidPartitionSpec", err)
 		return
 	}
 	data, meta, err := s.Engine.Snapshot(r.Context(), p, sc, t, part)
 	if err != nil {
 		code, status := "InvalidParameter", 400
-		if strings.Contains(err.Error(), "NoSuchTable") {
+		if strings.HasPrefix(err.Error(), "NoSuchTable:") {
 			code, status = "NoSuchTable", 404
+		}
+		if strings.HasPrefix(err.Error(), "NoSuchPartition:") {
+			code, status = "NoSuchPartition", 404
+		}
+		if strings.HasPrefix(err.Error(), "InvalidPartition:") {
+			code = "InvalidPartitionSpec"
 		}
 		fail(w, r, status, code, err)
 		return
@@ -532,7 +545,11 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request, p, sc, t strin
 		}
 		res.Rows = res.Rows[:n]
 		for {
-			data, e = wire.Arrow(res, max(1, n), true)
+			batchRows := min(4096, max(1, n))
+			if rawLimit > 0 {
+				batchRows = max(1, n)
+			}
+			data, e = wire.TunnelArrow(res, batchRows, arrowEncoding(r.Header.Get("Accept-Encoding")))
 			if e != nil || rawLimit == 0 || int64(len(data)) <= rawLimit || n <= 1 {
 				break
 			}
@@ -546,7 +563,13 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request, p, sc, t strin
 		fail(w, r, 400, "SerializationError", e)
 		return
 	}
-	encoded, encoding, e := compress(data, r.Header.Get("Accept-Encoding"), q.Has("arrow"))
+	var encoded []byte
+	var encoding string
+	if q.Has("arrow") && arrowEncoding(r.Header.Get("Accept-Encoding")) != "" {
+		encoded, encoding = data, arrowEncoding(r.Header.Get("Accept-Encoding"))
+	} else {
+		encoded, encoding, e = compress(data, r.Header.Get("Accept-Encoding"), q.Has("arrow"))
+	}
 	if e != nil {
 		fail(w, r, 400, "InvalidCompression", e)
 		return
@@ -602,4 +625,39 @@ func compress(b []byte, accept string, arrow bool) ([]byte, string, error) {
 		return nil, "", e
 	}
 	return out.Bytes(), encoding, nil
+}
+
+// Arrow codecs use IPC buffer compression; other codecs retain HTTP wrapping.
+func arrowEncoding(accept string) string {
+	for _, part := range strings.Split(accept, ",") {
+		token := strings.TrimSpace(strings.Split(part, ";")[0])
+		switch token {
+		case "", "identity", "x-snappy-framed", "x-odps-lz4-frame":
+			return ""
+		case "deflate":
+			if !strings.Contains(accept, ",") {
+				return ""
+			}
+		case "zstd":
+			return "zstd"
+		case "lz4_frame", "x-lz4-frame":
+			return token
+		}
+	}
+	return ""
+}
+func (s *Server) checkProject(w http.ResponseWriter, r *http.Request, project string) bool {
+	if project == s.cfg.Project {
+		return true
+	}
+	exists, err := s.Engine.HasProject(r.Context(), project)
+	if err != nil {
+		fail(w, r, 500, "InternalError", err)
+		return false
+	}
+	if !exists {
+		fail(w, r, 404, "NoSuchProject", fmt.Errorf("The specified project name does not exist."))
+		return false
+	}
+	return true
 }

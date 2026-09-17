@@ -50,3 +50,35 @@ func TestMetadataPartitionsPersistAndQualifiedNames(t *testing.T) {
 		t.Fatal("cross-project DDL accepted")
 	}
 }
+
+func TestProjectCatalogSurvivesRestartAndLastTableDrop(t *testing.T) {
+	path := t.TempDir() + "/catalog.duckdb"
+	e, err := Open(path, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err = e.Execute(ctx, "custom", "default", "create table t(id bigint);drop table t"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.Execute(ctx, "failed", "default", "create table t(id invalid_type)"); err == nil {
+		t.Fatal("expected invalid type")
+	}
+	if err = e.Close(); err != nil {
+		t.Fatal(err)
+	}
+	e, err = Open(path, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	for _, tc := range []struct {
+		p    string
+		want bool
+	}{{"custom", true}, {"failed", false}, {"missing", false}} {
+		got, err := e.HasProject(ctx, tc.p)
+		if err != nil || got != tc.want {
+			t.Fatalf("%s exists=%v err=%v", tc.p, got, err)
+		}
+	}
+}
