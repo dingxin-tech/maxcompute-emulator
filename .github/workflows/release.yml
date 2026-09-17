@@ -22,9 +22,6 @@ jobs:
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           grep -F "const Version = \"$version\"" internal/server/server.go
           echo "VERSION=$version" >> "$GITHUB_ENV"
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -33,12 +30,18 @@ jobs:
           cache-dependency-path: tests/java/pom.xml
       - name: Go validation
         run: |
-          go test -race ./...
-          go vet -unreachable=false ./...
+          docker build --platform linux/amd64 --target build -t emulator-build .
+          docker run --rm emulator-build sh -c 'go test -race ./... && go vet -unreachable=false ./...'
       - name: Build Linux source image
         run: docker build --platform linux/amd64 --label org.opencontainers.image.revision="$GITHUB_SHA" -t "$IMAGE:$VERSION" .
       - name: SDK acceptance before publication
         run: mvn -B -f tests/java/pom.xml -Demulator.image="$IMAGE:$VERSION" test
+      - name: C++ Arrow contract and fault tests
+        run: |
+          docker build -t emulator-cpp-contract tests/cpp
+          docker run -d --name emulator-cpp "$IMAGE:$VERSION" --listen 0.0.0.0:8080 --test-mode --test-network
+          trap 'docker logs emulator-cpp; docker rm -f emulator-cpp' EXIT
+          docker run --rm --network container:emulator-cpp emulator-cpp-contract http://127.0.0.1:8080 --faults
       - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_HUB_USER_NAME }}

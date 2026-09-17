@@ -12,17 +12,21 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
           cache: maven
           cache-dependency-path: tests/java/pom.xml
-      - run: go test -race ./...
-      # ANTLR-generated parser has unreachable branches; all other vet checks stay enabled.
-      - run: go vet -unreachable=false ./...
+      - name: Go validation in Linux container
+        run: |
+          docker build --platform linux/amd64 --target build -t emulator-build .
+          docker run --rm emulator-build sh -c 'go test -race ./... && go vet -unreachable=false ./...'
       - run: docker build --platform linux/amd64 -t maxcompute-emulator:ci .
       - run: mvn -B -f tests/java/pom.xml -Demulator.image=maxcompute-emulator:ci test
+      - name: C++ Arrow contract and fault tests
+        run: |
+          docker build -t emulator-cpp-contract tests/cpp
+          docker run -d --name emulator-cpp maxcompute-emulator:ci --listen 0.0.0.0:8080 --test-mode --test-network
+          trap 'docker logs emulator-cpp; docker rm -f emulator-cpp' EXIT
+          docker run --rm --network container:emulator-cpp emulator-cpp-contract http://127.0.0.1:8080 --faults
