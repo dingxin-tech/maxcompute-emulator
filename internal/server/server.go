@@ -134,7 +134,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if enc := w.Header().Get("Content-Encoding"); enc != "" {
 			t.Compression = enc
 		}
-		if t.Action != "" {
+		if t.Plane == "rest" {
+			slog.Info("rest", "request_id", requestID, "action", t.Action, "object", t.Object, "project", t.Project, "status", t.Status, "error_code", t.ErrorCode, "elapsed_ms", t.Elapsed)
+		} else if t.Action != "" {
 			slog.Info("tunnel", "request_id", requestID, "action", t.Action, "download_id_hash", t.DownloadHash, "project", t.Project, "table", t.Table, "partition_present", t.Partition, "start", t.Start, "count", t.Count, "columns_count", t.Columns, "format", t.Format, "compression", t.Compression, "status", t.Status, "error_code", t.ErrorCode, "elapsed_ms", t.Elapsed, "quota", t.Quota)
 		} else {
 			slog.Info("request", "method", r.Method, "request_id", requestID, "status", t.Status, "elapsed_ms", t.Elapsed)
@@ -203,7 +205,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !s.checkProject(w, r, project) {
 		return
 	}
-	if !s.beforeTunnel(w, r) {
+	if !s.beforeProjectRequest(w, r) {
 		return
 	}
 	schema := r.URL.Query().Get("curr_schema")

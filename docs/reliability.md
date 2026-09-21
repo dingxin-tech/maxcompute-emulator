@@ -11,6 +11,12 @@ Each Tunnel download request records `action` (`create`, `reload`, `read`,
 `count`, `columns_count`, `format`, `compression`, HTTP `status`, `error_code`,
 `elapsed_ms`, `quota` and `request_id`. `columns_count=0` means all columns were
 requested. Ranges describe the request, including fault-injected responses.
+
+Each resources or functions request logs a separate `rest` event with `action`
+(`create`, `read`, `update`, `delete` — the request verb), `object`
+(`resources` or `functions`), `project`, `status`, `error_code` and
+`elapsed_ms`. Object names are not logged, so a resource name never reaches the
+log stream.
 The timestamp is emitted when the handler finishes. Hashes are stable only
 within one process; logs omit raw session IDs, query strings and credentials.
 
@@ -37,10 +43,26 @@ curl -X PUT localhost:8080/__test/faults/retry -H 'Content-Type: application/jso
 curl localhost:8080/__test/faults/retry
 curl -X DELETE localhost:8080/__test/faults/retry
 curl -X DELETE localhost:8080/__test/faults
+
+curl -X PUT localhost:8080/__test/faults/udf-retry -H 'Content-Type: application/json' -d '{
+  "match":{"plane":"rest","object":"resources","action":"create","project":"test_project"},
+  "effect":{"type":"http_error","status":500},
+  "times":1,"ttl_seconds":60
+}'
 ```
 
-Rules match an explicit download action, with optional project, table, format
-and effective quota. `attempt` is the first matching request ordinal eligible
+`plane` defaults to the Tunnel download plane. `"plane":"rest"` selects the
+metadata plane (resources and registered functions), where `object` is required
+and `action` is the request verb; only `http_error` and `delay` are available
+there, because that plane has no stream, session or format to corrupt. A
+metadata fault rejects the request before the handler runs, so it simulates a
+transient server failure without leaving a partially created object — which is
+what a client retry loop needs to be tested against. Tunnel rules and metadata
+rules never match each other's requests, and `table`, `format` and `quota` are
+Tunnel-only match dimensions.
+
+Tunnel rules match an explicit download action, with optional project, table,
+format and effective quota. `attempt` is the first matching request ordinal eligible
 for injection (0 means immediately); `times` is the hit budget. Ordinals reset
 on PUT. Rules are checked in lexicographic ID order; at most one applies per
 request. GET returns attempts, hits and expiration. Up to 128 rules can exist;
@@ -104,8 +126,11 @@ Date within ±15 minutes, credential expiry and exact STS token. Invalid/missing
 credentials return 401 `Unauthorized`; insufficient grants return 403
 `NoPermission`. Grants are `project.table`, `project.*` or `*`; empty lists deny.
 GET, download create/complete and Storage read actions use read grants. SQL
-submission and other writes require write grants. Project-wide metadata access
-requires a project-wide grant. Health probes remain unauthenticated.
+submission and other writes require write grants. On the metadata plane the verb
+decides, not the name: creating a resource or registering a function is a write
+even though the Tunnel plane reserves `create` for read sessions, so those
+requests need a write grant, while listing and reading metadata needs a read
+grant. Project-wide metadata access requires a project-wide grant. Health probes remain unauthenticated.
 This is a deterministic ACL fixture, not RAM policy evaluation or real STS
 validation. Keep real MaxCompute authentication and quota gates.
 

@@ -19,7 +19,12 @@ import (
 
 type traceKey struct{}
 type requestTrace struct {
-	Action       string `json:"action"`
+	Action string `json:"action"`
+	// Plane separates the Tunnel data plane ("tunnel") from the REST metadata
+	// plane ("rest": resources, registration/functions). Object is the metadata
+	// collection the request addresses and is empty on the Tunnel plane.
+	Plane        string `json:"plane,omitempty"`
+	Object       string `json:"object,omitempty"`
 	DownloadHash string `json:"download_id_hash"`
 	Project      string `json:"project"`
 	Table        string `json:"table"`
@@ -92,6 +97,40 @@ func (s *Server) requestTrace(r *http.Request) *requestTrace {
 			}
 		}
 	}
+	// Metadata-plane requests are addressed below the project node, with an
+	// optional schema segment: projects/P[/schemas/S]/resources[/NAME] and
+	// projects/P[/schemas/S]/registration/functions[/NAME]. The action is the
+	// request verb, which is what a client retries, not the resulting state:
+	// POST is create, PUT is update, GET/HEAD is read, DELETE is delete.
+	if len(parts) >= 3 && parts[0] == "projects" {
+		sub := parts[2:]
+		if len(sub) >= 2 && sub[0] == "schemas" {
+			sub = sub[2:]
+		}
+		switch {
+		case len(sub) >= 1 && sub[0] == "resources":
+			t.Plane, t.Object = "rest", "resources"
+		case len(sub) >= 2 && sub[0] == "registration" && sub[1] == "functions":
+			t.Plane, t.Object = "rest", "functions"
+		}
+		if t.Object != "" {
+			switch r.Method {
+			case "GET", "HEAD":
+				t.Plane, t.Action = "rest", "read"
+			case "POST":
+				t.Plane, t.Action = "rest", "create"
+			case "PUT":
+				t.Plane, t.Action = "rest", "update"
+			case "DELETE":
+				t.Plane, t.Action = "rest", "delete"
+			default:
+				t.Plane, t.Object = "", ""
+			}
+		}
+	}
+	if t.Action != "" && t.Plane == "" {
+		t.Plane = "tunnel"
+	}
 	t.DownloadHash = s.hashSession(q.Get("downloadid"))
 	if q.Has("arrow") {
 		t.Format = "arrow"
@@ -144,6 +183,8 @@ func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 // Attempts count matching requests since PUT, including requests beyond the hit budget.
 type FaultMatch struct {
 	Action  string `json:"action"`
+	Plane   string `json:"plane,omitempty"`
+	Object  string `json:"object,omitempty"`
 	Project string `json:"project"`
 	Table   string `json:"table"`
 	Format  string `json:"format"`
@@ -248,6 +289,37 @@ func validateFault(v *FaultRule) error {
 	if v.Effect.Rows < 0 || v.Effect.Rows > 100000 || v.Effect.Bytes < 0 || v.Effect.Bytes > 64<<20 || v.Effect.DelayMS < 0 || v.Effect.DelayMS > 60000 {
 		return fmt.Errorf("effect exceeds test limits")
 	}
+	if v.Match.Plane == "rest" {
+		// The metadata plane has no streams, sessions, formats or quotas to
+		// corrupt, so only the two effects a client retry loop actually reacts
+		// to are offered: a structured HTTP failure and a slow response.
+		switch v.Match.Action {
+		case "create", "read", "update", "delete":
+		default:
+			return fmt.Errorf("explicit metadata-plane action required")
+		}
+		switch v.Match.Object {
+		case "resources", "functions":
+		default:
+			return fmt.Errorf("metadata-plane fault requires object resources or functions")
+		}
+		if v.Match.Table != "" || v.Match.Format != "" || v.Match.Quota != "" {
+			return fmt.Errorf("table, format and quota are Tunnel match dimensions")
+		}
+		switch v.Effect.Type {
+		case "http_error":
+			if v.Effect.Status < 400 || v.Effect.Status > 599 {
+				return fmt.Errorf("http_error requires status 400..599")
+			}
+		case "delay":
+		default:
+			return fmt.Errorf("metadata-plane faults support http_error and delay")
+		}
+		return nil
+	}
+	if v.Match.Object != "" {
+		return fmt.Errorf("object match requires plane rest")
+	}
 	switch v.Match.Action {
 	case "create", "reload", "read", "complete":
 	default:
@@ -299,7 +371,14 @@ func (s *Server) selectFault(t *requestTrace) *FaultEffect {
 			continue
 		}
 		m := v.Match
-		if m.Action != t.Action || m.Project != "" && m.Project != t.Project || m.Table != "" && m.Table != t.Table || m.Format != "" && m.Format != t.Format || m.Quota != "" && m.Quota != t.Quota {
+		plane := t.Plane
+		if plane == "" {
+			plane = "tunnel"
+		}
+		if m.Plane == "" {
+			m.Plane = "tunnel"
+		}
+		if m.Plane != plane || m.Object != t.Object || m.Action != t.Action || m.Project != "" && m.Project != t.Project || m.Table != "" && m.Table != t.Table || m.Format != "" && m.Format != t.Format || m.Quota != "" && m.Quota != t.Quota {
 			continue
 		}
 		v.Attempts++
@@ -312,12 +391,17 @@ func (s *Server) selectFault(t *requestTrace) *FaultEffect {
 	}
 	return nil
 }
-func (s *Server) beforeTunnel(w http.ResponseWriter, r *http.Request) bool {
+
+// beforeProjectRequest applies the Tunnel quota contract and then the selected
+// test fault. It runs for every project-scoped request, so the quota block is
+// gated on the Tunnel plane: a metadata-plane request neither names a quota nor
+// carries the tunnel quota header.
+func (s *Server) beforeProjectRequest(w http.ResponseWriter, r *http.Request) bool {
 	t := trace(r)
 	if t == nil {
 		return true
 	}
-	if t.Action != "" || strings.HasSuffix(r.URL.Path, "/tunnel") {
+	if t.Action != "" && t.Plane == "tunnel" || strings.HasSuffix(r.URL.Path, "/tunnel") {
 		found := t.Quota == "default"
 		for _, q := range s.cfg.Quotas {
 			if q == t.Quota {
