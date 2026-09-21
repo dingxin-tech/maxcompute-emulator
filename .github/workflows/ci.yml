@@ -24,6 +24,17 @@ jobs:
           docker run --rm emulator-build sh -c 'go test -race ./... && go vet -unreachable=false ./...'
       - run: docker build --platform linux/amd64 -t maxcompute-emulator:ci .
       - run: mvn -B -f tests/java/pom.xml -Demulator.image=maxcompute-emulator:ci test
+      - name: Set up Python for the PyODPS consumer probe
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: PyODPS resource/function contract probe
+        run: |
+          pip install -r tests/python/requirements.txt
+          docker run -d --name emulator-pyodps -p 127.0.0.1:8099:8080 maxcompute-emulator:ci
+          trap 'docker logs emulator-pyodps; docker rm -f emulator-pyodps' EXIT
+          for _ in $(seq 1 30); do curl -s -o /dev/null http://127.0.0.1:8099/ && break; sleep 1; done
+          python -u tests/python/run.py http://127.0.0.1:8099 test_project
       - name: C++ Arrow contract and fault tests
         run: |
           docker build -t emulator-cpp-contract tests/cpp

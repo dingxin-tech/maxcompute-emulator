@@ -18,6 +18,11 @@ pip install -r tests/python/requirements.txt
 python tests/python/run.py http://127.0.0.1:8080 test_project
 ```
 
+The acceptance workflow (`.github/workflows/ci.yml`) runs this probe against the
+same `maxcompute-emulator:ci` image the Java suite tests, on `127.0.0.1:8099`, so
+the Python-side wire shapes cannot rot between releases. A full run is ~1 s against
+a warm instance (30 cases, 30 passed / 0 failed is the expected line).
+
 Exit code is non-zero if any assertion fails. Every object it creates is named
 `pyodps_probe_*` and is deleted again, so the probe can be run repeatedly against
 one instance.
