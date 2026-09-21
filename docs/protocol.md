@@ -16,10 +16,15 @@
 | GET /projects/p/instances/id（taskstatus/result/source） | Java SDK XML 状态/结果，失败 Task 状态 Failed |
 | GET /projects/p、GET /projects/p/tables[/t] | Java SDK XML，Table.Schema 内嵌 JSON |
 | GET /readyz、/healthz、/capabilities | 就绪/版本/支持范围 JSON |
+| GET/POST /projects/p/resources；GET/PUT/POST/DELETE /projects/p/resources/{name} | 资源列表（name 前缀、type 过滤、marker/maxitems）与创建；单资源读取按 `?meta` 返回头部元数据、否则返回 payload（支持 `rOffset`/`rSize` 与 `x-odps-resource-has-remaining`）；PUT 覆盖，DELETE 删除 |
+| POST /projects/p/resources?rIsPart=true；POST/PUT ...?rOpMerge=true | Java SDK 分片上传：分片按确定性临时名 upsert，合并请求体 `<md5>|<part>[,..]` 校验 MD5 与 `x-odps-resource-merge-total-bytes` 后发布正式资源并删除分片 |
+| GET/POST /projects/p/registration/functions；GET/PUT/POST/DELETE .../functions/{name} | 函数列表与注册；别名在 XML 的 `Alias` 元素（兼容 `Name`），引用资源必须已存在 |
 
 HTTP 分区参数遵循 SDK 的 `ds=2026-09-14` 写法，也接受单引号值；SQL 中使用 `PARTITION(ds='2026-09-14')`。当前逗号是分区键分隔符，不支持分区值本身包含逗号。quotaName 解析到 default 或显式配置的命名 quota；不存在的命名 quota 返回 404 QuotaNotExist，不执行生产配额调度，asyncmode 接受后同步建立快照。Protobuf 的 raw_size 参数不裁剪行数；当前 CPP 只在 Arrow 路径发送它。
 
-HTTP 4xx/5xx 按端点返回 JSON 或 XML Code/Message/RequestId；NoSuchTable/NoSuchDownload、InvalidPartition/InvalidParameter/InvalidColumn、InvalidCompression、UnsupportedOperation、ResourceLimit。默认不校验签名；可选 strict 模式校验本地 ODPS v2/v4、STS、日期和 ACL，见 [可靠性配置](reliability.md)。超过并发入口容量返回 503 + Retry-After。
+HTTP 4xx/5xx 按端点返回 JSON 或 XML Code/Message/RequestId；NoSuchTable/NoSuchDownload、InvalidPartition/InvalidParameter/InvalidColumn、InvalidCompression、UnsupportedOperation、ResourceLimit；资源/函数不存在返回 404 NoSuchObject（SDK 的 exists() 依赖该映射），重复创建返回 ResourceAlreadyExists/FunctionAlreadyExists，类型不一致的覆盖返回 InvalidResourceType。
+
+资源与函数是元数据面：SQL 侧 `CREATE FUNCTION`/`DROP FUNCTION` 与调用 UDF 明确返回 `UnsupportedFeature`，不模拟执行。Volume 资源（`x-odps-copy-file-source`）返回 `UnsupportedOperation`。TABLE 资源只存元数据，下载其 payload 返回 `UnsupportedOperation`。名称按大小写不敏感解析，回读保留上传大小写。单资源 64 MiB、每 project+schema 512 MiB。默认不校验签名；可选 strict 模式校验本地 ODPS v2/v4、STS、日期和 ACL，见 [可靠性配置](reliability.md)。超过并发入口容量返回 503 + Retry-After。
 
 ## 编码
 

@@ -26,7 +26,7 @@ func Open(path string, maxRows int) (*Engine, error) {
 		return nil, e
 	}
 	db.SetMaxOpenConns(1)
-	for _, q := range []string{"SET memory_limit='512MB'", "SET threads=2", "SET enable_external_access=false", "CREATE TABLE IF NOT EXISTS main.emulator_projects(name VARCHAR PRIMARY KEY)", "CREATE TABLE IF NOT EXISTS main.emulator_catalog(namespace VARCHAR, name VARCHAR, definition VARCHAR, PRIMARY KEY(namespace,name))"} {
+	for _, q := range []string{"SET memory_limit='512MB'", "SET threads=2", "SET enable_external_access=false", "CREATE TABLE IF NOT EXISTS main.emulator_projects(name VARCHAR PRIMARY KEY)", "CREATE TABLE IF NOT EXISTS main.emulator_catalog(namespace VARCHAR, name VARCHAR, definition VARCHAR, PRIMARY KEY(namespace,name))", "CREATE TABLE IF NOT EXISTS main.emulator_resources(namespace VARCHAR, name VARCHAR, size BIGINT, definition VARCHAR, content BLOB, PRIMARY KEY(namespace,name))", "CREATE TABLE IF NOT EXISTS main.emulator_functions(namespace VARCHAR, name VARCHAR, definition VARCHAR, PRIMARY KEY(namespace,name))"} {
 		if _, e = db.Exec(q); e != nil {
 			db.Close()
 			return nil, e
@@ -171,6 +171,9 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		if ddlErr != nil {
 			return none, ddlErr
 		}
+		if word(ts[1]) == "function" {
+			return none, fmt.Errorf("UnsupportedFeature: CREATE FUNCTION; register UDFs through the /registration/functions REST API")
+		}
 		if len(ts) < 4 || word(ts[1]) != "table" {
 			return none, fmt.Errorf("UnsupportedFeature: CREATE")
 		}
@@ -286,6 +289,9 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		_, err = tx.ExecContext(ctx, "INSERT INTO main.emulator_catalog VALUES(?,?,?)", ns, name, string(b))
 		return none, err
 	case "drop":
+		if word(ts[1]) == "function" {
+			return none, fmt.Errorf("UnsupportedFeature: DROP FUNCTION; drop UDFs through DELETE on the /registration/functions REST API")
+		}
 		if len(ts) < 3 || word(ts[1]) != "table" {
 			return none, fmt.Errorf("UnsupportedFeature: DROP")
 		}
