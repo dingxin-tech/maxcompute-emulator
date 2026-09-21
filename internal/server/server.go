@@ -49,6 +49,11 @@ type instance struct {
 	Data                                             engine.Result
 	Project, Schema, ID, Name, Query, Status, Output string
 	Created                                          time.Time
+	// TaskType is the Instance/Job/Tasks element the instance was created from
+	// ("SQL" for a one-shot statement, "SQLRT" for an interactive session).
+	TaskType string
+	// MCQA is non-nil for session instances; it holds the sub-query KV.
+	MCQA *mcqaSession
 }
 type Server struct {
 	Engine    *engine.Engine
@@ -193,7 +198,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "capabilities" {
-		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; ODPS2 subset", "resources": []string{"file", "jar", "py", "archive", "table-metadata"}, "functions": []string{"java-udf-metadata", "sql-function-metadata", "embedded-function-metadata"}, "unsupported": []string{"volume-resources", "sql-udf-execution", "volumes", "mcqa", "catalogapi"}, "auth": s.authDescription(), "test_faults": s.cfg.TestMode, "quotas": append([]string{"default"}, s.cfg.Quotas...)})
+		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; ODPS2 subset", "resources": []string{"file", "jar", "py", "archive", "table-metadata"}, "functions": []string{"java-udf-metadata", "sql-function-metadata", "embedded-function-metadata"}, "mcqa": []string{"sqlrt-session", "subquery-query", "subquery-result", "subquery-cancel", "session-stop"}, "unsupported": []string{"volume-resources", "sql-udf-execution", "volumes", "mcqa-named-session-attach", "mcqa-v2-maxqa", "catalogapi"}, "auth": s.authDescription(), "test_faults": s.cfg.TestMode, "quotas": append([]string{"default"}, s.cfg.Quotas...)})
 		return
 	}
 	parts := strings.Split(path, "/")
@@ -323,10 +328,29 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 						Name  string `xml:"Name"`
 						Query string `xml:"Query"`
 					} `xml:"SQL"`
+					SQLRT []struct {
+						Name   string `xml:"Name"`
+						Config struct {
+							Properties []mcqaProperty `xml:"Property"`
+						} `xml:"Config"`
+					} `xml:"SQLRT"`
 				} `xml:"Tasks"`
 			} `xml:"Job"`
 		}
-		if e := xml.NewDecoder(r.Body).Decode(&req); e != nil || len(req.Job.Tasks.SQL) != 1 {
+		if e := xml.NewDecoder(r.Body).Decode(&req); e != nil {
+			fail(w, r, 400, "InvalidParameter", fmt.Errorf("malformed instance XML"))
+			return
+		}
+		if len(req.Job.Tasks.SQLRT) > 0 {
+			if len(req.Job.Tasks.SQL) > 0 {
+				fail(w, r, 400, "InvalidParameter", fmt.Errorf("one task type per instance"))
+				return
+			}
+			rt := req.Job.Tasks.SQLRT[0]
+			s.mcqaCreate(w, r, p, sc, rt.Name, mcqaTaskSettings(rt.Config.Properties))
+			return
+		}
+		if len(req.Job.Tasks.SQL) != 1 {
 			fail(w, r, 400, "InvalidParameter", fmt.Errorf("one SQL task in Instance/Job/Tasks required"))
 			return
 		}
@@ -380,15 +404,45 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 		s.instanceDownload(w, r, p, sc, rest[0])
 		return
 	}
-	if len(rest) != 1 || r.Method != "GET" {
+	if len(rest) != 1 || r.Method != "GET" && r.Method != "PUT" {
 		fail(w, r, 400, "UnsupportedOperation", fmt.Errorf("unsupported instance operation"))
 		return
 	}
 	s.mu.Lock()
 	i := s.instances[rest[0]]
 	s.mu.Unlock()
-	if i == nil || i.Project != p || i.Schema != sc || i.Status == "Running" || time.Since(i.Created) > s.cfg.SessionTTL {
+	if i == nil || i.Project != p || i.Schema != sc {
 		fail(w, r, 404, "NoSuchInstance", fmt.Errorf("unknown instance"))
+		return
+	}
+	if r.URL.Query().Has("info") {
+		s.mcqaInfo(w, r, i)
+		return
+	}
+	if r.Method == "PUT" {
+		if i.MCQA == nil {
+			fail(w, r, 400, "UnsupportedOperation", fmt.Errorf("only SQLRT session instances can be stopped"))
+			return
+		}
+		s.mcqaStop(w, r, i)
+		return
+	}
+	s.mu.Lock()
+	expired := s.mcqaIdle(i)
+	if expired {
+		delete(s.instances, i.ID)
+	}
+	s.mu.Unlock()
+	if expired {
+		fail(w, r, 404, "NoSuchInstance", fmt.Errorf("unknown instance"))
+		return
+	}
+	if i.MCQA == nil && (i.Status == "Running" || time.Since(i.Created) > s.cfg.SessionTTL) {
+		fail(w, r, 404, "NoSuchInstance", fmt.Errorf("unknown instance"))
+		return
+	}
+	if i.MCQA != nil {
+		s.mcqaInstanceXML(w, i)
 		return
 	}
 	now := i.Created.UTC().Format(http.TimeFormat)
@@ -409,13 +463,20 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 const maxInstanceBytes int64 = 512 << 20
 
 func instanceBytes(i *instance) int64 {
-	return i.Data.Bytes + int64(len(i.Query)+len(i.Output))
+	return i.Data.Bytes + i.MCQA.bytes() + int64(len(i.Query)+len(i.Output))
 }
 
 func (s *Server) reserveInstance(i *instance) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for key, old := range s.instances {
+		if old.MCQA != nil {
+			// Sessions age out on idle time, not on creation time.
+			if s.mcqaIdle(old) {
+				delete(s.instances, key)
+			}
+			continue
+		}
 		if old.Status != "Running" && time.Since(old.Created) > s.cfg.SessionTTL {
 			delete(s.instances, key)
 		}
