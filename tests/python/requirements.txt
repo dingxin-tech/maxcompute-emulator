@@ -1,0 +1,3 @@
+# PyODPS consumer contract probe (tests/python/run.py).
+# Pinned to the minor line the emulator README documents.
+pyodps>=0.12,<0.14
