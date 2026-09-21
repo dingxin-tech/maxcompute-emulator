@@ -23,7 +23,7 @@ public class ReliabilityTest {
   @BeforeAll
   static void start() {
     String config =
-        "{\"local\":{\"secret\":\"fixture-secret\",\"read\":[\"test_project.*\"],\"write\":[\"test_project.*\"]},\"sts\":{\"secret\":\"fixture-secret\",\"token\":\"fixture-token\",\"read\":[\"test_project.*\"],\"write\":[\"test_project.*\"]},\"denied\":{\"secret\":\"fixture-secret\",\"read\":[]}}";
+        "{\"local\":{\"secret\":\"fixture-secret\",\"read\":[\"test_project.*\"],\"write\":[\"test_project.*\"]},\"sts\":{\"secret\":\"fixture-secret\",\"token\":\"fixture-token\",\"read\":[\"test_project.*\"],\"write\":[\"test_project.*\"]},\"denied\":{\"secret\":\"fixture-secret\",\"read\":[]},\"reader\":{\"secret\":\"fixture-secret\",\"read\":[\"test_project.*\"]}}";
     container =
         new GenericContainer<>(
                 DockerImageName.parse(
@@ -191,6 +191,64 @@ public class ReliabilityTest {
       d = t.createDownloadSession("test_project", name);
     }
     assertEquals(2, d.getRecordCount());
+  }
+
+  // The metadata plane is the only place where a POST is a write with no Tunnel
+  // session behind it, so the read-session "create" exception must not reach it.
+  @Test
+  void metadataPlaneWriteNeedsWriteGrant() throws Exception {
+    Odps o = client(new AliyunAccount("reader", "fixture-secret"));
+    String name = "readonly_" + UUID.randomUUID().toString().replace("-", "") + ".py";
+    com.aliyun.odps.PyResource resource = new com.aliyun.odps.PyResource();
+    resource.setName(name);
+    var e =
+        assertThrows(
+            OdpsException.class,
+            () ->
+                o.resources()
+                    .create(
+                        resource,
+                        new java.io.ByteArrayInputStream("print(1)".getBytes(StandardCharsets.UTF_8))));
+    assertEquals("NoPermission", e.getErrorCode());
+    assertFalse(o.resources().exists(name), "denied create must not publish a resource");
+  }
+
+  @Test
+  void injectedMetadataCreateFailureLeavesNoPartialResource() throws Exception {
+    Odps o = client(new AliyunAccount("local", "fixture-secret"));
+    String name = "flaky_" + UUID.randomUUID().toString().replace("-", "") + ".py";
+    String rule =
+        "{\"match\":{\"plane\":\"rest\",\"object\":\"resources\",\"action\":\"create\"},\"effect\":{\"type\":\"http_error\",\"status\":500,\"code\":\"InternalError\"},\"times\":1}";
+    var response =
+        HttpClient.newHttpClient()
+            .send(
+                HttpRequest.newBuilder(URI.create(endpoint + "/__test/faults/metadata"))
+                    .PUT(HttpRequest.BodyPublishers.ofString(rule))
+                    .build(),
+                HttpResponse.BodyHandlers.ofString());
+    assertEquals(200, response.statusCode());
+    com.aliyun.odps.PyResource resource = new com.aliyun.odps.PyResource();
+    resource.setName(name);
+    var e =
+        assertThrows(
+            OdpsException.class,
+            () ->
+                o.resources()
+                    .create(
+                        resource,
+                        new java.io.ByteArrayInputStream("print(1)".getBytes(StandardCharsets.UTF_8))));
+    assertEquals("InternalError", e.getErrorCode());
+    assertFalse(o.resources().exists(name), "an injected failure must not publish a resource");
+    // The hit budget is spent, so the client's own next attempt is a normal 201.
+    o.resources()
+        .create(resource, new java.io.ByteArrayInputStream("print(2)".getBytes(StandardCharsets.UTF_8)));
+    assertTrue(o.resources().exists(name), "retry after the injected failure must succeed");
+    try (java.io.InputStream in = o.resources().getResourceAsStream(name)) {
+      var out = new java.io.ByteArrayOutputStream();
+      for (int b; (b = in.read()) >= 0; ) out.write(b);
+      assertEquals("print(2)", out.toString(StandardCharsets.UTF_8));
+    }
+    o.resources().delete(name);
   }
 
   @Test

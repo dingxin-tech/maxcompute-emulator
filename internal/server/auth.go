@@ -153,7 +153,11 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) bool {
 			}
 		}
 
-		if !storageRead && r.Method != "GET" && r.Method != "HEAD" && t.Action != "create" && t.Action != "complete" {
+		// Only a Tunnel download create/complete establishes a read session, so
+		// it stays on read grants. A metadata-plane POST named "create" is a
+		// write: resources and functions are project objects, not read sessions.
+		readEstablishing := (t.Action == "create" || t.Action == "complete") && t.Plane != "rest"
+		if !storageRead && r.Method != "GET" && r.Method != "HEAD" && !readEstablishing {
 			grants = c.Write
 		}
 		allowed := false
