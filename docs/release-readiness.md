@@ -13,7 +13,9 @@
 | 能力 | 1.0.0 行为 | 后续边界 |
 | --- | --- | --- |
 | 项目查询 | 测试项目按请求自动存在，回读 owner/schema 开关 | 不模拟账号权限或真实项目注册 |
-| 表查询/exists/list | Java SDK XML，表 ID 持久化；name 前缀、marker/maxitems 分页 | 不含 views、外表定义、授权、标签、资源和函数管理 |
+| 表查询/exists/list | Java SDK XML，表 ID 持久化；name 前缀、marker/maxitems 分页 | 不含 views、外表定义、授权、标签 |
+| 资源 CRUD | FILE/JAR/PY/ARCHIVE payload 上传（单次或 Java SDK 分片+合并，MD5 与总字节校验）、`?meta` 头部元数据、payload 下载（rOffset/rSize）、覆盖、删除、前缀分页 | 不含 Volume 资源；单资源 64 MiB、每命名空间 512 MiB；不模拟跨项目资源引用 |
+| 函数注册 | Java/SQL/内嵌函数元数据登记，引用资源必须存在，覆盖更新与删除，前缀分页 | 不执行 UDF；SQL `CREATE/DROP FUNCTION` 返回 UnsupportedFeature |
 | 表 schema | 字段/分区字段/类型/nullable/comment | 暂不支持 ALTER ADD/DROP/CHANGE COLUMN |
 | 表扩展属性 | PRIMARY KEY、transactional、schema version、创建时间、lifecycle 回读 | schema version 固定 1（不支持演进）；时间非云端统计；lifecycle 不自动清理 |
 | PK bucket metadata | 模拟单个 HASH bucket，与本地 upsert 协议一致 | 不模拟云端分桶/分布式事务 |

@@ -191,7 +191,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "capabilities" {
-		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; ODPS2 subset", "auth": s.authDescription(), "test_faults": s.cfg.TestMode, "quotas": append([]string{"default"}, s.cfg.Quotas...)})
+		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; ODPS2 subset", "resources": []string{"file", "jar", "py", "archive", "table-metadata"}, "functions": []string{"java-udf-metadata", "sql-function-metadata", "embedded-function-metadata"}, "unsupported": []string{"volume-resources", "sql-udf-execution", "volumes", "mcqa", "catalogapi"}, "auth": s.authDescription(), "test_faults": s.cfg.TestMode, "quotas": append([]string{"default"}, s.cfg.Quotas...)})
 		return
 	}
 	parts := strings.Split(path, "/")
@@ -232,6 +232,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "text/plain")
 		io.WriteString(w, host)
+		return
+	}
+	if len(rest) >= 1 && rest[0] == "resources" {
+		s.resources(w, r, project, schema, rest[1:])
+		return
+	}
+	if len(rest) >= 2 && rest[0] == "registration" && rest[1] == "functions" {
+		s.functions(w, r, project, schema, rest[2:])
 		return
 	}
 	if len(rest) >= 1 && rest[0] == "instances" {

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add resource CRUD: single-payload and Java SDK chunked part/merge uploads, `?meta` header metadata, ranged downloads, update, delete, prefix and paginated listing, plus TABLE resource metadata.
+- Add function registration (`/projects/p/registration/functions`) for Java, SQL and embedded functions with resource-reference validation; execution still returns `UnsupportedFeature`.
+- Declare `resources`, `functions` and `unsupported` surfaces in `/capabilities`.
+- Reject volume-backed resources and chunked-upload integrity mismatches with structured errors instead of publishing partial payloads.
+
 ## 1.1.0 — 2026-09-17
 
 - Add JSON Tunnel lifecycle logs with per-process session hashes and requested ranges.

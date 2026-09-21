@@ -65,6 +65,7 @@ Arrow on JDK 17 requires `--add-opens=java.base/java.nio=ALL-UNNAMED`; the test 
 | --- | --- |
 | SQL | CREATE/DROP/TRUNCATE TABLE, INSERT INTO/OVERWRITE, SELECT/WITH; ODPS grammar validation with DuckDB execution |
 | Metadata | Table identity, schema, primary keys and properties; table listing; STRING partition create/delete/exists/list/pagination; persistent empty partitions |
+| Resources and functions | File-like resource upload (single payload or Java SDK part + merge), metadata read, download with `rOffset`/`rSize`, update, delete, prefix/paginated listing; TABLE resource metadata; Java/SQL/embedded function registration referencing existing resources |
 | Tunnel | Protobuf and Arrow batch upload/download; stream upload; Upsert/delete/partial updates; instance result download |
 | Storage API v2 | Arrow read/write, Batch/BatchCompatible/Streaming/StreamingRealtime sessions, commit/abort, projections and partition selection |
 | Types | Integers, floating point, BOOLEAN, STRING/BINARY, DECIMAL (precision ≤38), DATE/DATETIME/TIMESTAMP, ARRAY/MAP/STRUCT |
@@ -76,7 +77,9 @@ See [data transfer](docs/data-transfer.md) and [protocol details](docs/protocol.
 
 This is a local/CI test service. By default authentication signatures and permissions are **not validated**; optional strict mode uses local test credentials; keep it on a trusted test network. It is not a replacement for real MaxCompute acceptance tests.
 
-Unsupported: Storage v1, Volume/Blob, CDC/incremental reads, filter predicate pushdown, explicit Schema management, column schema evolution, resources/UDF management, distributed scheduling, and full ODPS SQL semantics. Unsupported operations return errors rather than cloud behavior being assumed.
+Unsupported: Storage v1, Volume/Blob, CDC/incremental reads, filter predicate pushdown, explicit Schema management, column schema evolution, UDF **execution** (functions are registered metadata; SQL `CREATE FUNCTION`/`DROP FUNCTION` and calling a UDF return `UnsupportedFeature`), volume-backed resources, distributed scheduling, and full ODPS SQL semantics.
+
+Resource payloads are capped at 64 MiB each and 512 MiB per project/schema. Resource and function names resolve case-insensitively while the uploaded spelling is what listings return. Unsupported operations return errors rather than cloud behavior being assumed.
 
 Flink 1.16.2 standalone bounded uploads were tested with Protobuf/Arrow and ordinary/dynamic-partition tables. Use `sink.standalone.enable=true`. A coordinator-mode bounded input in the tested connector can finish without committing rows; that mode is not certified. Checkpoint recovery and cross-job exactly-once have not been validated.
 

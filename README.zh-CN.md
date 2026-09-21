@@ -97,7 +97,10 @@ v1 Testcontainers 的模式保留，但就绪条件改为 HTTP `/readyz`，无�
 | 限制 | SQL≤1 MiB/100 语句；结果默认≤100,000 行/估算 64 MiB；每类会话默认64个、单写会话暂存≤64 MiB；16 个并发 HTTP 请求 |
 | 会话 | 默认 TTL 30 分钟；完成/过期后不可恢复；仅运行期间有效 |
 | Arrow 分页 | Tunnel 单响应一批；指定 raw_size 时最多65,536行且至少返回一行；不指定则返回请求范围；Storage 按 MaxBatchRows 输出多批 |
-| 不支持 | Storage v1、Volume/Blob、增量/CDC/过滤表达式下推、资源/UDF、授权模拟、异步 SQL、完整 ODPS 函数库/隐式转换语义 |
+| 资源/函数 | 资源上传（单次 payload 或 Java SDK 分片+合并）、元数据读取、按 `rOffset`/`rSize` 下载、覆盖、删除、前缀与分页列举；TABLE 资源元数据；引用已存在资源的 Java/SQL/内嵌函数注册 |
+| 不支持 | Storage v1、Volume/Blob、增量/CDC/过滤表达式下推、UDF 执行（函数只有元数据，SQL `CREATE FUNCTION`/`DROP FUNCTION` 与调用 UDF 返回 `UnsupportedFeature`）、Volume 资源、授权模拟、异步 SQL、完整 ODPS 函数库/隐式转换语义 |
+
+资源 payload 上限 64 MiB/个、512 MiB/project+schema；资源名与函数名按大小写不敏感解析，回读保留上传时的大小写。
 
 DATETIME/TIMESTAMP 常量、STRING cast、ARRAY 构造与 NAMED_STRUCT 有显式映射；这不是通用 ODPS SQL 兼容实现。支持子集以测试为准，未实现操作返回带 request-id 的错误。引擎关闭外部文件/网络访问，内部数据库命名空间与函数不可从 SQL 访问。
 
