@@ -9,6 +9,8 @@
 - Extend test-mode fault injection to the metadata plane: `"plane":"rest"` rules match resources or functions by request verb and can inject `http_error` or `delay` without touching Tunnel sessions.
 - Log resources and functions requests as a separate `rest` event with action, object and project, keeping object names out of the log stream.
 - Require write grants to create or update resources and functions under strict authentication; the Tunnel read-session `create` exception no longer applies to metadata verbs.
+- Add MCQA / SQLRT interactive sessions: an `SQLRT` task instance stays `Running` until the client stops it or it idles out, and its statements run as sub queries over the instance information KV (`?info`) using the Java SDK's own object status codes, with `query`/`cancel` writes and `status`/`progress`/`result`/`result_<id>` reads.
+- Declare `mcqa` in `/capabilities`, and name the remaining session gaps (named-session attach, MaxQA v2) separately from the surface that works.
 
 ## 1.1.0 — 2026-09-17
 
