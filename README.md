@@ -59,6 +59,29 @@ mvn -B -f tests/java/pom.xml \
 
 Arrow on JDK 17 requires `--add-opens=java.base/java.nio=ALL-UNNAMED`; the test POM sets it. Both endpoints must use the mapped port. Between containers on one Docker network, use the emulator's container DNS name instead of `localhost`.
 
+## JDBC
+
+Point the official driver at the emulator with the same endpoint, project and dummy
+credentials:
+
+```
+jdbc:odps:http://127.0.0.1:8080?project=test_project&accessId=test-ak&accessKey=test-sk&tunnelEndpoint=http://127.0.0.1:8080
+```
+
+`tests/jdbc` runs the published driver (currently `odps-jdbc` 3.10.13, which bundles
+`odps-sdk-core` 0.58.1) against the image, in offline mode:
+
+```bash
+mvn -B -f tests/jdbc/pom.xml \
+  -Demulator.image=maxcompute/maxcompute-emulator:1.1.0 test
+```
+
+The driver signs a logview token and opens a Tunnel download session for **every**
+statement, including `CREATE TABLE` and `INSERT`, which is a stricter contract than the
+SDK path exercises; that is where these checks live. MCQA (`interactiveMode=mcqa`) needs the
+session plane; `interactiveMode=maxqa` is refused by name.
+
+
 ## Supported capabilities
 
 | Area | Implemented subset |
@@ -100,6 +123,7 @@ go test -race ./...
 go vet -unreachable=false ./... # generated ANTLR unreachable branches excluded
 docker build --platform linux/amd64 -t maxcompute-emulator:dev .
 mvn -B -f tests/java/pom.xml -Demulator.image=maxcompute-emulator:dev test
+mvn -B -f tests/jdbc/pom.xml -Demulator.image=maxcompute-emulator:dev test
 ```
 
 Native builds require the Go version in `go.mod` and a C/C++ compiler (CGO). The Dockerfile builds inside Linux. [Build notes](docs/build.md) describe module proxies and the optional Zig cross-build path. Generated ANTLR sources are checked in; Java is not needed to build the server. See [grammar provenance](grammar/README.md).
