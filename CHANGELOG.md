@@ -9,6 +9,7 @@
 - Extend test-mode fault injection to the metadata plane: `"plane":"rest"` rules match resources or functions by request verb and can inject `http_error` or `delay` without touching Tunnel sessions.
 - Log resources and functions requests as a separate `rest` event with action, object and project, keeping object names out of the log stream.
 - Require write grants to create or update resources and functions under strict authentication; the Tunnel read-session `create` exception no longer applies to metadata verbs.
+- Consume the parts a chunked merge assembled from when that merge fails verification, while refusals decided before any part is read (a duplicate create, a malformed manifest) leave the uploaded parts in place.
 
 ## 1.1.0 — 2026-09-17
 
