@@ -5,6 +5,7 @@
 - Answer the three endpoints the official JDBC driver calls before any statement runs: `POST /projects/p/authorization?sign_bearer_token` (placeholder logview token), `GET /logview/host`, and `GET /connection/mcqa` (refused by name, so a MaxQA misconfiguration stops resurfacing as an unrelated endpoint error).
 - Emit schema `columns`/`partitionKeys` as arrays instead of JSON `null`, which the Java SDK's `TunnelTableSchema` rejects — every DDL and INSERT result has no columns, so the download session the driver opens for one was unparseable.
 - Add `tests/jdbc`: acceptance against the published `odps-jdbc` artifact (offline mode), covering a statement with no result set end to end.
+- Decline non-select sub queries in a SQLRT session before executing them (`queryId: -1` with `ODPS-1850001 Non select query not supported.`, lift with `odps.sql.session.select.only=false`): a client that discovers a non-select at fetch time reruns the statement offline, so a session that had already executed an INSERT applied it twice.
 - Add resource CRUD: single-payload and Java SDK chunked part/merge uploads, `?meta` header metadata, ranged downloads, update, delete, prefix and paginated listing, plus TABLE resource metadata.
 - Add function registration (`/projects/p/registration/functions`) for Java, SQL and embedded functions with resource-reference validation; execution still returns `UnsupportedFeature`.
 - Declare `resources`, `functions` and `unsupported` surfaces in `/capabilities`.
