@@ -14,6 +14,7 @@
 - Require write grants to create or update resources and functions under strict authentication; the Tunnel read-session `create` exception no longer applies to metadata verbs.
 - Add MCQA / SQLRT interactive sessions: an `SQLRT` task instance stays `Running` until the client stops it or it idles out, and its statements run as sub queries over the instance information KV (`?info`) using the Java SDK's own object status codes, with `query`/`cancel` writes and `status`/`progress`/`result`/`result_<id>` reads.
 - Declare `mcqa` in `/capabilities`, and name the remaining session gaps (named-session attach, MaxQA v2) separately from the surface that works.
+- Download an MCQA sub query's result over the instance tunnel (`?data&cached&taskname=..&queryid=..`): a record stream that carries its own schema, the `odps-tunnel-record-count` the SDK pages on, `rowrange` paging, `sizelimit` truncation and the `READ_TABLE_MAX_ROW` cap, with `InstanceTypeNotSupported` for statements that have no result set. This is the Java SDK's default interactive fetch and JDBC MaxQA's read path.
 
 ## 1.1.0 — 2026-09-17
 

@@ -108,7 +108,9 @@ func fail(w http.ResponseWriter, r *http.Request, status int, code string, e err
 	if len(message) > 600 {
 		message = message[:600]
 	}
-	if r.URL.Query().Has("downloads") || r.URL.Query().Has("downloadid") || r.URL.Query().Has("uploads") || r.URL.Query().Has("uploadid") || strings.Contains(r.URL.Path, "/upserts") || strings.Contains(r.URL.Path, "/streams") || strings.Contains(r.URL.Path, "storage") {
+	// `cached` is the direct session-result download, whose client parses a JSON tunnel
+	// error rather than an XML one.
+	if r.URL.Query().Has("downloads") || r.URL.Query().Has("downloadid") || r.URL.Query().Has("uploads") || r.URL.Query().Has("uploadid") || r.URL.Query().Has("cached") || strings.Contains(r.URL.Path, "/upserts") || strings.Contains(r.URL.Path, "/streams") || strings.Contains(r.URL.Path, "storage") {
 		jsonResponse(w, status, map[string]string{"Code": code, "Message": message, "RequestId": w.Header().Get("x-odps-request-id")})
 	} else {
 		w.Header().Set("Content-Type", "application/xml")
@@ -198,7 +200,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "capabilities" {
-		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; ODPS2 subset", "resources": []string{"file", "jar", "py", "archive", "table-metadata"}, "functions": []string{"java-udf-metadata", "sql-function-metadata", "embedded-function-metadata"}, "mcqa": []string{"sqlrt-session", "subquery-query", "subquery-result", "subquery-cancel", "session-stop"}, "unsupported": []string{"volume-resources", "sql-udf-execution", "volumes", "mcqa-named-session-attach", "mcqa-v2-maxqa", "catalogapi"}, "auth": s.authDescription(), "test_faults": s.cfg.TestMode, "quotas": append([]string{"default"}, s.cfg.Quotas...)})
+		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; ODPS2 subset", "resources": []string{"file", "jar", "py", "archive", "table-metadata"}, "functions": []string{"java-udf-metadata", "sql-function-metadata", "embedded-function-metadata"}, "mcqa": []string{"sqlrt-session", "subquery-query", "subquery-result", "subquery-cancel", "session-stop", "subquery-instance-tunnel"}, "unsupported": []string{"volume-resources", "sql-udf-execution", "volumes", "mcqa-named-session-attach", "mcqa-v2-maxqa", "catalogapi"}, "auth": s.authDescription(), "test_faults": s.cfg.TestMode, "quotas": append([]string{"default"}, s.cfg.Quotas...)})
 		return
 	}
 	if path == "logview/host" {
@@ -414,6 +416,13 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 	}
 	if len(rest) == 1 && (r.URL.Query().Has("downloads") || r.URL.Query().Has("downloadid")) {
 		s.instanceDownload(w, r, p, sc, rest[0])
+		return
+	}
+	// A session sub query is read straight off the instance: the Java SDK's direct
+	// download arrives as GET ?data&cached&taskname=.., with no download id to look up.
+	if len(rest) == 1 && r.Method == http.MethodGet && r.URL.Query().Has("data") &&
+		(r.URL.Query().Has("cached") || r.URL.Query().Has("taskname")) {
+		s.mcqaDirectDownload(w, r, p, sc, rest[0])
 		return
 	}
 	if len(rest) != 1 || r.Method != "GET" && r.Method != "PUT" {

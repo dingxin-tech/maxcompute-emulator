@@ -33,6 +33,8 @@ JDBC 驱动对每条语句都会先签一个 logview token，再为实例建立 
 
 ## 编码
 
+MCQA 子查询直读没有 download session 可查，schema 只能随流走：帧头是 field 1 的 JSON schema（TunnelTableSchema 的 `columns`/`partitionKeys` 形状），后接 SCHEMA_END_TAG 33553920 与该帧自己的 CRC32C（覆盖 field number 的 4 字节小端值与 JSON 字节，不含 tag 与长度 varint），校验和后 CRC 归零，其后的记录部分与下面的 Protobuf 完全一致。响应头 `odps-tunnel-record-count` 是从本次 `rowrange` 起点起还能读到的行数，不是全量结果：Java 的 SessionRecordSetIterator 只取第一次响应的这个数并据此翻页，报大全量会让客户端越过结果末尾继续读取。查询仍在执行时该读取阻塞等待（长轮询），超时返回 Java SDK 认得的 `OdpsTaskTimeout`/“Wait for cache data timeout”，而不是先给一个空流。
+
 Protobuf 按 public SDK 的列序编码，NULL 不写字段。记录结束 tag 33553408 后写 CRC32C，流尾 meta-count 33554430 与 checksum-of-checksums 33554431；CRC 数值按小端逻辑值更新，不包含传输长度和 NULL 标记。DATE 为天数，DATETIME 为毫秒，TIMESTAMP 为秒+纳秒，DECIMAL 为十进制文本。MAP 在引擎边界从 DuckDB OrderedMap 转换，ARRAY/STRUCT 递归编码。
 
 Tunnel Arrow 不是普通带 Schema 消息的 IPC stream：客户端从会话元数据构造 schema，服务端只发送 RecordBatch payload。帧头为大端 chunk size（65536），每满块追加 CRC32C，最后追加全流 CRC32C。ZSTD 和 LZ4 frame 压缩 Arrow IPC buffer，外层 Tunnel CRC 帧保持未压缩；deflate 仍包裹整个 Tunnel 帧。空表和 count=0 返回合法空数据帧。常规 Arrow 请求每批最多4096行；带 raw_size 的请求最多一批，CPP BufferArrowRecordReader 按实际行数推进；raw_size 过小时仍返回至少一行，以保证进度。
@@ -58,6 +60,7 @@ Tunnel Arrow 不是普通带 Schema 消息的 IPC stream：客户端从会话元
 | POST/GET/PUT `/projects/p/tables/t/streams` | 创建/恢复/写 pack；flush 后可见；dynamic_partition 支持逐 pack 分区 |
 | POST/GET/PUT/POST/DELETE `/projects/p/tables/t/upserts` | 创建/恢复/暂存 U/D/提交/中止；支持部分列更新 |
 | POST/GET `/projects/p/instances/i?downloads` / `?downloadid=id` | SQL 实例结果快照与 Tunnel 下载，复用表读取格式 |
+| GET `/projects/p/instances/i?data&cached&taskname=t[&queryid=n][&rowrange=(s,c)][&sizelimit=n][&instance_tunnel_limit_enabled]` | MCQA 子查询结果直读（Java SDK 默认交互取数、JDBC MaxQA 路径）：自带 schema 的 Protobuf 记录流，只支持未压缩 |
 | POST `/api/storage/v2` 或 `/api/storage/v3` | Action + Target 协议；Java 0.61.2-public 实际调用 v3 |
 
 Storage 表 Action：TableCreateReadSession、TableGetReadSession、TableRead、TablePreview、TableCreateWriteSession、TableGetWriteSession、TableCreateWriteStream、TableGetWriteStream、TableWrite、TableCloseWriteStream、TableCommitWriteSession、TableAbortWriteSession。实例 Action：InstanceCreateReadSession、InstanceGetReadSession（GET）、InstanceRead。

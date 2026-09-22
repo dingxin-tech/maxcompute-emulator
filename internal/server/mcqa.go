@@ -59,6 +59,12 @@ type mcqaQuery struct {
 	Warnings string
 	ID       int
 	Created  time.Time
+	// Data is the typed result behind the CSV text of the information channel. The
+	// instance-tunnel read serves it as records, so a consumer gets the same values and
+	// the same types through either path. It is retained for the same window as the CSV
+	// text — the mcqaRetainedQueries entries dropped by mcqaSession.drop, and counted by
+	// bytes into the instance budget.
+	Data engine.Result
 }
 
 // mcqaSession is the state behind a SQLRT instance. Fields are guarded by Server.mu;
@@ -115,7 +121,7 @@ func (m *mcqaSession) bytes() int64 {
 	}
 	var total int64
 	for _, q := range m.queries {
-		total += int64(len(q.Result) + len(q.Query))
+		total += q.Data.Bytes + int64(len(q.Result)+len(q.Query))
 	}
 	return total
 }
@@ -360,13 +366,16 @@ func (s *Server) runSubQuery(ctx context.Context, i *instance, id int, query str
 		q.Result = "Sub query cancelled"
 	default:
 		q.Status = mcqaStatusTerminated
+		q.Data = res
 		q.Result = sessionResultCSV(res)
 	}
 }
 
 // sessionResultCSV renders a result the way the SQLRT information channel does: the
 // first line is the column-name header, because CSVRecordParser#parse reads that line
-// to build the schema. Values are formatted like the offline instance result.
+// to build the schema. Values are formatted like the offline instance result, and every
+// row of the result is rendered — the tunnel read of the same sub query serves the same
+// rows, so neither path can look truncated relative to the other.
 func sessionResultCSV(res engine.Result) string {
 	header := make([]string, len(res.Columns))
 	for n, c := range res.Columns {
