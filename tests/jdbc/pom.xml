@@ -1,0 +1,42 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>local.emulator</groupId>
+  <artifactId>jdbc-acceptance</artifactId>
+  <version>1.1.0</version>
+  <properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- Docker 29 rejects docker-java's default API 1.32. -->
+    <docker.api.version>1.44</docker.api.version>
+    <!-- The released driver, not a local build: this module exists to catch what the
+         published artifact does, which is what every JDBC user runs. -->
+    <jdbc.version>3.10.13</jdbc.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>com.aliyun.odps</groupId><artifactId>odps-jdbc</artifactId><version>${jdbc.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.10.2</version><scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId><artifactId>testcontainers</artifactId><version>1.20.6</version><scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId><artifactId>slf4j-simple</artifactId><version>1.7.36</version><scope>test</scope>
+    </dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.2.5</version>
+        <configuration>
+          <systemPropertyVariables><api.version>${docker.api.version}</api.version></systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
