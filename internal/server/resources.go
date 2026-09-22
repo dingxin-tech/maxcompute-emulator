@@ -238,6 +238,16 @@ func (s *Server) putResourcePart(w http.ResponseWriter, r *http.Request, p, sc, 
 // mergeResourceParts assembles the declared parts into the final resource. The
 // body is "<md5-hex>|<part>[,<part>...]"; the digest and the declared total
 // bytes are both verified before the payload becomes visible.
+//
+// A merge consumes the parts it declared, whether or not the target ends up
+// published: a payload that fails verification is rejected together with the
+// chunks it was built from, so a client that retries (the SDKs reuse
+// deterministic part names) never finds a stale chunk in the way, and a
+// session that gives up does not leave litter behind. Requests that were
+// refused before any part was read keep the parts untouched: a malformed
+// manifest names nothing to consume, a missing part is a refusal about that
+// part, and creating over an existing resource is decided before the merge
+// runs.
 func (s *Server) mergeResourceParts(w http.ResponseWriter, r *http.Request, p, sc, name string, mode engine.ResourceMode) {
 	target, ok := s.resourceTarget(w, r, name)
 	if !ok {
@@ -272,26 +282,33 @@ func (s *Server) mergeResourceParts(w http.ResponseWriter, r *http.Request, p, s
 		}
 		merged = append(merged, content...)
 	}
+	consumeParts := func() {
+		for _, part := range parts {
+			s.Engine.DeleteResource(r.Context(), p, sc, part)
+		}
+	}
 	if size := r.Header.Get("x-odps-resource-merge-total-bytes"); size != "" {
 		declared, e := strconv.ParseInt(size, 10, 64)
 		if e != nil || declared != int64(len(merged)) {
 			fail(w, r, 400, "InvalidParameter", fmt.Errorf("x-odps-resource-merge-total-bytes does not match the merged payload"))
+			consumeParts()
 			return
 		}
 	}
 	sum := md5.Sum(merged)
 	if !strings.EqualFold(hex.EncodeToString(sum[:]), strings.TrimSpace(digest)) {
 		fail(w, r, 400, "InvalidParameter", fmt.Errorf("merged payload does not match MD5 %s", strings.TrimSpace(digest)))
+		consumeParts()
 		return
 	}
 	s.storeResource(w, r, p, sc, target, r.Header.Get("x-odps-resource-type"), r.Header.Get("x-odps-comment"),
 		strings.EqualFold(r.Header.Get("x-odps-resource-istemp"), "true"), "", merged, mode)
 	if w.Header().Get("Location") == "" {
+		// The target was refused (it already exists, or its kind is invalid), so
+		// nothing was assembled and the parts stay for the client to retry with.
 		return
 	}
-	for _, part := range parts {
-		s.Engine.DeleteResource(r.Context(), p, sc, part)
-	}
+	consumeParts()
 }
 
 func (s *Server) resourceMeta(w http.ResponseWriter, r *http.Request, p, sc, name string) {

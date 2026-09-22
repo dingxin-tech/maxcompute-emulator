@@ -180,7 +180,9 @@ func TestResourceRESTContract(t *testing.T) {
 	if w.Code != 404 {
 		t.Fatalf("parts must be cleaned after merge: %d %s", w.Code, w.Body.String())
 	}
-	// A mismatching digest or byte count must not publish a partial payload.
+	// A mismatching digest or byte count must not publish a partial payload, and
+	// the merge consumes the chunk it assembled from: an unverifiable part is
+	// dead weight, and both SDKs re-upload the same deterministic name on retry.
 	for _, body := range []string{md5hex("nope") + "|" + partB, "0123456789abcdef0123456789abcdef|" + partB} {
 		resourceRequest(t, s, "POST", "/projects/p/resources?rIsPart=true", partB, "file", temp, "x")
 		w = resourceRequest(t, s, "POST", "/projects/p/resources?rOpMerge=true", "bad.py", "py", nil, body)
@@ -189,6 +191,9 @@ func TestResourceRESTContract(t *testing.T) {
 		}
 		if w = resourceRequest(t, s, "GET", "/projects/p/resources/bad.py", "", "", nil, ""); w.Code != 404 {
 			t.Fatalf("failed merge must not publish: %d %s", w.Code, w.Body.String())
+		}
+		if w = resourceRequest(t, s, "GET", "/projects/p/resources/"+partB, "", "", nil, ""); w.Code != 404 {
+			t.Fatalf("refused merge must consume its part: %d %s", w.Code, w.Body.String())
 		}
 	}
 	resourceRequest(t, s, "POST", "/projects/p/resources?rIsPart=true", partB, "file", temp, "x")
@@ -208,6 +213,22 @@ func TestResourceRESTContract(t *testing.T) {
 	}
 	if w = resourceRequest(t, s, "GET", "/projects/p/resources/chunked.py", "", "", nil, ""); w.Body.String() != "print(2)" {
 		t.Fatalf("chunked overwrite content: %q", w.Body.String())
+	}
+	// A create-merge whose target already exists is refused before the parts are
+	// read, so unlike a failed merge it leaves the uploaded chunk in place for
+	// the client to retry with (as an update, or after deleting the target).
+	if w = resourceRequest(t, s, "POST", "/projects/p/resources?rIsPart=true", partA, "file", temp, "print(3)"); w.Code != 200 {
+		t.Fatalf("part for the colliding merge: %d %s", w.Code, w.Body.String())
+	}
+	w = resourceRequest(t, s, "POST", "/projects/p/resources?rOpMerge=true", "chunked.py", "py", nil, md5hex("print(3)")+"|"+partA)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "ResourceAlreadyExists") {
+		t.Fatalf("colliding merge: %d %s", w.Code, w.Body.String())
+	}
+	if w = resourceRequest(t, s, "GET", "/projects/p/resources/"+partA, "", "", nil, ""); w.Code != 200 {
+		t.Fatalf("a refused create must keep the part it was given: %d %s", w.Code, w.Body.String())
+	}
+	if w = resourceRequest(t, s, "GET", "/projects/p/resources/chunked.py", "", "", nil, ""); w.Body.String() != "print(2)" {
+		t.Fatalf("a colliding merge must not touch the target: %q", w.Body.String())
 	}
 	// A TABLE resource keeps metadata only and validates the referenced table.
 	if _, err = e.Execute(context.Background(), "p", "default", "create table src(id bigint);"); err != nil {

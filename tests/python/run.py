@@ -132,6 +132,15 @@ def quiet(fn, *args, **kw):
 
 
 def cleanup():
+    # A part left behind by an aborted run of *this* probe would otherwise be
+    # attributed to the next one. Sweep them by our own prefix, so the cleanup
+    # can never touch another client's in-flight upload.
+    try:
+        stale = [r.name for r in odps.list_resources(prefix=PREFIX) if ".part.tmp." in r.name]
+    except Exception:
+        stale = []
+    for stale_part in stale:
+        quiet(odps.delete_resource, stale_part)
     for suffix in ("single.py", "bytes.bin", "sio.txt", "chunk.bin", "upd.bin", "schema.bin",
                    "big.bin", "local.txt", "streamres.bin", "onlyschema.bin", "malformed.bin", "malformed2.bin",
                    "badmd5.bin", "paged_%02d.bin"):
@@ -203,8 +212,13 @@ def stream_write():
     eq(fresh.size, len(BLOB), "merged size")
     eq(fresh.open("rb").read(), BLOB, "merged payload")
     eq(fresh.content_md5, hashlib.md5(BLOB).hexdigest(), "merged md5")
-    leftovers = [r.name for r in odps.list_resources() if ".part.tmp." in r.name]
-    eq(leftovers, [], "temp parts removed after merge")
+    # Scope the sweep to this case's own resource: a temp part left behind by a
+    # different client (a refused duplicate create keeps the chunks it uploaded,
+    # which is the service behaviour the probe pins further down) is not a
+    # regression in *our* merge, and asserting project-wide made this case depend
+    # on what else had run against the instance before it.
+    leftovers = [r.name for r in odps.list_resources(prefix=PREFIX + "_big.bin") if ".part.tmp." in r.name]
+    eq(leftovers, [], "this resource's temp parts removed after merge")
     return "size=%d md5=verified parts_left=%d" % (fresh.size, len(leftovers))
 
 
@@ -432,11 +446,13 @@ def merge_with_wrong_md5():
     eq(code, 400, "status")
     eq("MD5" in body, True, "reason mentions MD5")
     eq(odps.get_resource(name).open("rb").read(), b"seed", "previous payload survives")
-    # a refused merge must leave the parts alone (they are not the client's to keep)
-    eq(any(".part.tmp." in r.name for r in odps.list_resources(prefix=name)), True, "part kept after refusal")
-    quiet(odps.delete_resource, name + ".part.tmp.000001.000000")
+    # The merge got as far as assembling the payload and then rejected it, so the
+    # chunk it consumed is gone with it; only refusals decided before any part was
+    # read (a duplicate create, a malformed manifest) keep the parts.
+    eq([r.name for r in odps.list_resources(prefix=name) if ".part.tmp." in r.name], [],
+       "part consumed by the refused merge")
     odps.delete_resource(name)
-    return "400 on MD5 mismatch, old payload intact"
+    return "400 on MD5 mismatch, old payload intact, part consumed"
 
 
 case("a merge whose MD5 does not match is refused", merge_with_wrong_md5)
