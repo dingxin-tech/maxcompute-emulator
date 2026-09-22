@@ -5,6 +5,7 @@ package wire
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"hash/crc32"
 	"math"
@@ -150,6 +151,51 @@ func (e *encoder) value(t engine.Type, v any) error {
 	return nil
 }
 func Protobuf(r engine.Result) ([]byte, error) { return protobuf(r, true) }
+
+// schemaEndTag closes the in-stream schema frame; ProtoWireConstant.SCHEMA_END_TAG in
+// the Java SDK, magic number 2^25-512.
+const schemaEndTag = 33553920
+
+// ProtobufSchema encodes a result as a Tunnel stream whose first frame carries the
+// schema as JSON. It is what an MCQA sub-query download needs: that read has no
+// download session to ask for a schema, so the stream has to bring its own
+// (ProtobufRecordStreamReader#readSchema, which the Java SDK calls the MCQA direct
+// download interface). The schema frame is checksummed on its own and the reader
+// resets before the first record, so the record stream after it is byte-identical to
+// Protobuf's.
+func ProtobufSchema(r engine.Result) ([]byte, error) {
+	head, e := schemaFrame(r.Columns)
+	if e != nil {
+		return nil, e
+	}
+	body, e := protobuf(r, true)
+	if e != nil {
+		return nil, e
+	}
+	return append(head, body...), nil
+}
+
+// schemaFrame renders the in-stream schema frame for cols. The reader CRCs the field
+// number as a 4-byte little-endian int and then the payload bytes, exactly as the
+// record path CRCs each field; the tag and the length varint are outside the checksum.
+func schemaFrame(cols []engine.Column) ([]byte, error) {
+	if cols == nil {
+		cols = []engine.Column{}
+	}
+	s, e := json.Marshal(map[string]any{"columns": cols, "partitionKeys": []engine.Column{}})
+	if e != nil {
+		return nil, e
+	}
+	w := &encoder{}
+	w.i32(1)
+	w.u(1<<3 | 2)
+	w.u(uint64(len(s)))
+	w.b = append(w.b, s...)
+	w.sum(s)
+	w.u(schemaEndTag << 3)
+	w.u(uint64(w.crc))
+	return w.b, nil
+}
 
 // ProtobufPrefix omits the stream trailer for row-boundary disconnect tests.
 func ProtobufPrefix(r engine.Result) ([]byte, error) { return protobuf(r, false) }

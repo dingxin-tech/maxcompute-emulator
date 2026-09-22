@@ -59,12 +59,22 @@ type mcqaQuery struct {
 	Warnings string
 	ID       int
 	Created  time.Time
+	// Data is the typed result behind the CSV text of the information channel. The
+	// instance-tunnel read serves it as records, so a consumer gets the same values and
+	// the same types through either path. It is retained for the same window as the CSV
+	// text — the mcqaRetainedQueries entries dropped by mcqaSession.drop, and counted by
+	// bytes into the instance budget.
+	Data engine.Result
 }
 
 // mcqaSession is the state behind a SQLRT instance. Fields are guarded by Server.mu;
 // statement execution runs outside that lock (see runSubQuery).
 type mcqaSession struct {
-	name       string
+	name string
+	// selectOnly is the session's promise that nothing but a whole select runs here.
+	// The service defaults it to true; a client that wants DDL or DML inside the session
+	// says so with odps.sql.session.select.only.
+	selectOnly bool
 	live       bool
 	nextID     int
 	lastID     int
@@ -73,8 +83,8 @@ type mcqaSession struct {
 	lastActive time.Time
 }
 
-func newMCQASession(name string) *mcqaSession {
-	return &mcqaSession{name: name, live: true, queries: map[int]*mcqaQuery{}, lastActive: time.Now()}
+func newMCQASession(name string, selectOnly bool) *mcqaSession {
+	return &mcqaSession{name: name, selectOnly: selectOnly, live: true, queries: map[int]*mcqaQuery{}, lastActive: time.Now()}
 }
 
 // expired reports whether the session has been idle past the configured TTL. Idle, not
@@ -115,7 +125,7 @@ func (m *mcqaSession) bytes() int64 {
 	}
 	var total int64
 	for _, q := range m.queries {
-		total += int64(len(q.Result) + len(q.Query))
+		total += q.Data.Bytes + int64(len(q.Result)+len(q.Query))
 	}
 	return total
 }
@@ -168,7 +178,7 @@ func (s *Server) mcqaCreate(w http.ResponseWriter, r *http.Request, p, sc, taskN
 	i := &instance{
 		Project: p, Schema: sc, ID: id(), Name: taskName, TaskType: "SQLRT",
 		Status: "Running", Created: time.Now(),
-		MCQA: newMCQASession(name),
+		MCQA: newMCQASession(name, !sessionRunsNonSelect(mcqaSettingsMap(settings))),
 	}
 	if !s.reserveInstance(i) {
 		fail(w, r, 429, "ResourceLimit", fmt.Errorf("instance limit"))
@@ -294,6 +304,18 @@ func (s *Server) mcqaSetInfo(w http.ResponseWriter, r *http.Request, i *instance
 			s.informationReply(w, mcqaInfoFailed, "Invalid sub query payload")
 			return
 		}
+		if m.selectOnly && !sessionRunsNonSelect(sub.Settings) && !isSelectStatement(sub.Query) {
+			// Refuse before running anything. A client that only learns the statement
+			// was not a select when it comes to fetch the result reruns it offline —
+			// and an INSERT that already ran in the session then applies twice. queryId
+			// -1 with status ok is how the service reports a sub query it declined to
+			// start, and the message is the pair FallbackPolicy matches on ("ODPS-185"),
+			// which is what turns the refusal into an offline rerun rather than an error.
+			s.mu.Unlock()
+			payload, _ := json.Marshal(map[string]any{"queryId": -1, "status": mcqaInfoOK, "result": mcqaSelectOnlyRefusal})
+			s.informationReply(w, mcqaInfoOK, string(payload))
+			return
+		}
 		m.nextID++
 		id := m.nextID
 		m.drop()
@@ -360,13 +382,16 @@ func (s *Server) runSubQuery(ctx context.Context, i *instance, id int, query str
 		q.Result = "Sub query cancelled"
 	default:
 		q.Status = mcqaStatusTerminated
+		q.Data = res
 		q.Result = sessionResultCSV(res)
 	}
 }
 
 // sessionResultCSV renders a result the way the SQLRT information channel does: the
 // first line is the column-name header, because CSVRecordParser#parse reads that line
-// to build the schema. Values are formatted like the offline instance result.
+// to build the schema. Values are formatted like the offline instance result, and every
+// row of the result is rendered — the tunnel read of the same sub query serves the same
+// rows, so neither path can look truncated relative to the other.
 func sessionResultCSV(res engine.Result) string {
 	header := make([]string, len(res.Columns))
 	for n, c := range res.Columns {

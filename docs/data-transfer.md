@@ -11,6 +11,7 @@
 | StreamUploadSession | Protobuf pack | flush 即可见、动态/静态分区、retry trace-id 去重 |
 | UpsertSession | Protobuf U/D | PRIMARY KEY、按键替换/删除、部分列更新、提交/中止、重试去重 |
 | InstanceTunnel | Protobuf；HTTP Arrow 格式复用 | SQL 结果快照；Java InstanceTunnel 的 RecordReader 验收 |
+| InstanceTunnel MCQA 直读 | Protobuf（schema 随流） | 子查询按 queryid 读取、`rowrange` 分页、`sizelimit` 裁剪、`instance_tunnel_limit_enabled` 应用 10000 行上限、非 select 返回 InstanceTypeNotSupported；不做压缩与 Arrow |
 | Storage 表读取 | Arrow IPC | read session/get、Index 或 Offset/Count、MaxBatchRows、投影、分区列表、preview |
 | Storage 实例读取 | Arrow IPC | create/get session、Offset/Count 结果读取 |
 | Storage Batch | Arrow IPC | stream 创建/恢复/version、flush 暂存、close、选择 streams commit、abort、静态分区 overwrite |

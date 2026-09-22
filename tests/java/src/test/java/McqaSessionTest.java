@@ -67,11 +67,9 @@ public class McqaSessionTest {
   /**
    * An interactive executor that reads results through the session information channel.
    *
-   * <p>{@code useInstanceTunnel(false)} is deliberate, and it is a scope boundary rather
-   * than a convenience: by default the SDK fetches sub-query results through the instance
-   * tunnel, which the emulator does not serve for sessions yet, and it then silently
-   * re-runs the statement as an offline instance — an acceptance test written that way
-   * would pass even with nothing implemented on the session plane.
+   * <p>{@code useInstanceTunnel(false)} is deliberate: it pins one read path down so a
+   * regression on the other one cannot hide behind it. With the tunnel enabled the SDK
+   * never asks the session for CSV text at all — see {@link #tunnelExecutor()}.
    */
   private SQLExecutor executor() throws OdpsException {
     return SQLExecutorBuilder.builder()
@@ -79,6 +77,76 @@ public class McqaSessionTest {
         .executeMode(ExecuteMode.INTERACTIVE)
         .useInstanceTunnel(false)
         .build();
+  }
+
+  /**
+   * The fetch path the SDK uses by default, and the one JDBC's MaxQA mode takes: a
+   * sub-query result is downloaded from the instance tunnel, and because a direct
+   * download has no download session to ask, the schema has to travel in the stream.
+   */
+  private SQLExecutor tunnelExecutor() throws OdpsException {
+    return SQLExecutorBuilder.builder()
+        .odps(odps)
+        .executeMode(ExecuteMode.INTERACTIVE)
+        .tunnelEndpoint(endpoint)
+        .build();
+  }
+
+  @Test
+  void defaultFetchDownloadsTheSubQueryResult() throws Exception {
+    SQLExecutor executor = tunnelExecutor();
+    try {
+      executor.run("select id, s from " + table + " order by id", new HashMap<>());
+      String sessionId = executor.getInstance().getId();
+      java.util.List<Record> records = executor.getResult();
+      assertEquals(2, records.size(), "rows over the instance tunnel");
+      // Typed values, not the strings the information channel's CSV hands back: the
+      // column types came from the in-stream schema, which only this read has.
+      assertEquals(1L, ((Number) records.get(0).get(0)).longValue(), "bigint id");
+      assertEquals("two", records.get(1).getString(1), "string s");
+      assertEquals(2, records.get(0).getColumns().length, "schema from the stream");
+      // The observable that separates "the tunnel answered" from "the SDK gave up":
+      // a failed session download re-runs the statement offline, which replaces the
+      // session instance with a new one and logs why.
+      assertEquals(sessionId, executor.getInstance().getId(),
+          "an offline fallback would replace the session instance");
+      assertTrue(executor.isRunningInInteractiveMode(), "still interactive after the download");
+      // QueryInfo writes "Will fallback to offline mode" when a read leaves the session,
+      // and "Running in interactive mode" when it stays on one. getExecutionLog() drains,
+      // so the list has to be read once.
+      String logText = String.join("\n", executor.getExecutionLog());
+      assertTrue(logText.contains("Running in interactive mode"),
+          "the executor should report the session it ran on: " + logText);
+      assertFalse(logText.contains("fallback"), "the download fell back: " + logText);
+    } finally {
+      executor.close();
+    }
+  }
+
+  /**
+   * The row count a direct download reports is what the SDK iterates, so it has to be the
+   * rows still available from the requested offset — the total would send it reading past
+   * the end of the result. An offset read is the only way to exercise that without a
+   * ten-thousand-row statement in the acceptance suite.
+   */
+  @Test
+  void offsetReadPagesTheSubQueryResult() throws Exception {
+    SQLExecutor executor = tunnelExecutor();
+    try {
+      executor.run("select id from " + table + " order by id", new HashMap<>());
+      String sessionId = executor.getInstance().getId();
+      java.util.List<Record> tail = executor.getResult(1L, null, null);
+      assertEquals(1, tail.size(), "rows from offset 1");
+      assertEquals(2L, ((Number) tail.get(0).get(0)).longValue(), "the row after the offset");
+      java.util.List<Record> window = executor.getResult(0L, 1L, null);
+      assertEquals(1, window.size(), "a count limit is a count limit");
+      assertEquals(1L, ((Number) window.get(0).get(0)).longValue());
+      java.util.List<Record> rest = executor.getResult(2L, 10L, null);
+      assertTrue(rest.isEmpty(), "reading past the end is empty, not an error");
+      assertEquals(sessionId, executor.getInstance().getId(), "paging stayed on the session");
+    } finally {
+      executor.close();
+    }
   }
 
   @Test

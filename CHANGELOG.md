@@ -5,6 +5,7 @@
 - Answer the three endpoints the official JDBC driver calls before any statement runs: `POST /projects/p/authorization?sign_bearer_token` (placeholder logview token), `GET /logview/host`, and `GET /connection/mcqa` (refused by name, so a MaxQA misconfiguration stops resurfacing as an unrelated endpoint error).
 - Emit schema `columns`/`partitionKeys` as arrays instead of JSON `null`, which the Java SDK's `TunnelTableSchema` rejects — every DDL and INSERT result has no columns, so the download session the driver opens for one was unparseable.
 - Add `tests/jdbc`: acceptance against the published `odps-jdbc` artifact (offline mode), covering a statement with no result set end to end.
+- Decline non-select sub queries in a SQLRT session before executing them (`queryId: -1` with `ODPS-1850001 Non select query not supported.`, lift with `odps.sql.session.select.only=false`): a client that discovers a non-select at fetch time reruns the statement offline, so a session that had already executed an INSERT applied it twice.
 - Add resource CRUD: single-payload and Java SDK chunked part/merge uploads, `?meta` header metadata, ranged downloads, update, delete, prefix and paginated listing, plus TABLE resource metadata.
 - Add function registration (`/projects/p/registration/functions`) for Java, SQL and embedded functions with resource-reference validation; execution still returns `UnsupportedFeature`.
 - Declare `resources`, `functions` and `unsupported` surfaces in `/capabilities`.
@@ -14,6 +15,7 @@
 - Require write grants to create or update resources and functions under strict authentication; the Tunnel read-session `create` exception no longer applies to metadata verbs.
 - Add MCQA / SQLRT interactive sessions: an `SQLRT` task instance stays `Running` until the client stops it or it idles out, and its statements run as sub queries over the instance information KV (`?info`) using the Java SDK's own object status codes, with `query`/`cancel` writes and `status`/`progress`/`result`/`result_<id>` reads.
 - Declare `mcqa` in `/capabilities`, and name the remaining session gaps (named-session attach, MaxQA v2) separately from the surface that works.
+- Download an MCQA sub query's result over the instance tunnel (`?data&cached&taskname=..&queryid=..`): a record stream that carries its own schema, the `odps-tunnel-record-count` the SDK pages on, `rowrange` paging, `sizelimit` truncation and the `READ_TABLE_MAX_ROW` cap, with `InstanceTypeNotSupported` for statements that have no result set. This is the Java SDK's default interactive fetch and JDBC MaxQA's read path.
 
 ## 1.1.0 — 2026-09-17
 
