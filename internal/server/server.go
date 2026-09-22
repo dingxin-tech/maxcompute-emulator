@@ -196,6 +196,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; ODPS2 subset", "resources": []string{"file", "jar", "py", "archive", "table-metadata"}, "functions": []string{"java-udf-metadata", "sql-function-metadata", "embedded-function-metadata"}, "unsupported": []string{"volume-resources", "sql-udf-execution", "volumes", "mcqa", "catalogapi"}, "auth": s.authDescription(), "test_faults": s.cfg.TestMode, "quotas": append([]string{"default"}, s.cfg.Quotas...)})
 		return
 	}
+	if path == "logview/host" {
+		s.logView(w, r)
+		return
+	}
+	if path == "connection/mcqa" {
+		s.mcqaConnection(w, r)
+		return
+	}
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 || parts[0] != "projects" {
 		fail(w, r, 404, "UnsupportedOperation", fmt.Errorf("unsupported endpoint"))
@@ -244,6 +252,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.functions(w, r, project, schema, rest[2:])
 		return
 	}
+	if len(rest) == 1 && rest[0] == "authorization" {
+		s.signBearerToken(w, r, project)
+		return
+	}
 	if len(rest) >= 1 && rest[0] == "instances" {
 		s.instance(w, r, project, schema, rest[1:])
 		return
@@ -282,7 +294,7 @@ func tableXML(p, s string, t engine.Table) string {
 	}
 	reserved, _ := json.Marshal(reservedMap)
 	lifecycle, _ := strconv.ParseInt(t.Properties["lifecycle"], 10, 64)
-	b, _ := json.Marshal(map[string]any{"columns": t.Columns, "partitionKeys": t.Partitions, "Reserved": string(reserved), "createTime": t.Created, "lastDDLTime": t.Created, "lastModifiedTime": t.Created, "lifecycle": lifecycle})
+	b, _ := json.Marshal(map[string]any{"columns": asArray(t.Columns), "partitionKeys": asArray(t.Partitions), "Reserved": string(reserved), "createTime": t.Created, "lastDDLTime": t.Created, "lastModifiedTime": t.Created, "lifecycle": lifecycle})
 	return "<Table><Name>" + esc(t.Name) + "</Name><TableId>" + esc(t.ID) + "</TableId><Project>" + esc(p) + "</Project><SchemaName>" + esc(s) + "</SchemaName><Owner>emulator</Owner><Type>MANAGED_TABLE</Type><Schema>" + esc(string(b)) + "</Schema><Comment>" + esc(t.Properties["comment"]) + "</Comment></Table>"
 }
 func (s *Server) table(w http.ResponseWriter, r *http.Request, p, sc, t string) {
@@ -497,8 +509,21 @@ func (s *Server) createDownload(w http.ResponseWriter, r *http.Request, p, sc, t
 	}
 	jsonResponse(w, 200, sessionJSON(sess))
 }
+
+// asArray substitutes an empty slice for a nil one. encoding/json writes a nil slice as
+// `null`, and the Java SDK reads schema members with JsonObject#getAsJsonArray, which
+// throws "Not a JSON Array: null" — reported to the caller as a TunnelException with
+// nothing to suggest the real cause. A result with no columns is normal: every DDL and
+// every INSERT is one, and the JDBC driver opens a download session for them too.
+func asArray[T any](v []T) []T {
+	if v == nil {
+		return []T{}
+	}
+	return v
+}
+
 func sessionJSON(s *session) map[string]any {
-	return map[string]any{"DownloadID": s.ID, "RecordCount": len(s.Data.Rows), "Status": "normal", "Owner": "emulator", "Initiated": s.Created.UTC().Format(time.RFC3339), "Schema": map[string]any{"columns": s.Meta.Columns, "partitionKeys": s.Meta.Partitions, "IsVirtualView": false}, "QuotaName": s.Quota}
+	return map[string]any{"DownloadID": s.ID, "RecordCount": len(s.Data.Rows), "Status": "normal", "Owner": "emulator", "Initiated": s.Created.UTC().Format(time.RFC3339), "Schema": map[string]any{"columns": asArray(s.Meta.Columns), "partitionKeys": asArray(s.Meta.Partitions), "IsVirtualView": false}, "QuotaName": s.Quota}
 }
 func (s *Server) download(w http.ResponseWriter, r *http.Request, p, sc, t string) {
 	q := r.URL.Query()
