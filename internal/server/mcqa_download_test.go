@@ -230,7 +230,8 @@ func TestMCQADirectDownloadHonoursSizeLimit(t *testing.T) {
 // the same sub query still returns every row.
 func TestMCQADirectDownloadLimitedFlagCapsRows(t *testing.T) {
 	_, h := fixture(t, Config{SessionTTL: time.Hour})
-	id := createSession(t, h, "")
+	// The table grows through the session, which a select-only session would decline.
+	id := createSession(t, h, `{"`+mcqaSelectOnlyKey+`":"false"}`)
 	// 2048 fixture rows, doubled three times: 16384, i.e. past the 10000 cap.
 	for n := 0; n < 3; n++ {
 		if _, ir := submitStatement(t, h, id, fmt.Sprintf("insert into t select id+%d, s from t", n+1)); ir.Status != mcqaInfoOK {
@@ -287,7 +288,10 @@ func TestMCQADirectDownloadLimitedFlagCapsRows(t *testing.T) {
 // happened to come back empty.
 func TestMCQADirectDownloadRefusesNonSelect(t *testing.T) {
 	_, h := fixture(t, Config{SessionTTL: time.Hour})
-	id := createSession(t, h, "")
+	// Select-only has to be lifted to get here: a default session declines a non-select
+	// before running it (mcqa_select_only_test.go), so reaching the download with one
+	// means the client asked for exactly this combination.
+	id := createSession(t, h, `{"`+mcqaSelectOnlyKey+`":"false"}`)
 	for _, statement := range []string{"create table ns(a bigint)", "insert into t values (9001,'x')"} {
 		queryID, ir := submitStatement(t, h, id, statement)
 		if ir.Status != mcqaInfoOK {
