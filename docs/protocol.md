@@ -16,6 +16,9 @@
 | GET /projects/p/instances/id（taskstatus/result/source） | Java SDK XML 状态/结果，失败 Task 状态 Failed |
 | GET /projects/p、GET /projects/p/tables[/t] | Java SDK XML，Table.Schema 内嵌 JSON |
 | GET /readyz、/healthz、/capabilities | 就绪/版本/支持范围 JSON |
+| GET /logview/host | 纯文本 logview host（Java SDK/JDBC 每条语句都会查一次） |
+| POST /projects/p/authorization?sign_bearer_token | `<Authorization><Result>` 占位 token，按请求生成；不参与鉴权 |
+| GET /connection/mcqa | 固定 404 UnsupportedOperation，消息写明只模拟 SQLRT（MCQA v2/MaxQA 未实现） |
 | GET/POST /projects/p/resources；GET/PUT/POST/DELETE /projects/p/resources/{name} | 资源列表（name 前缀、type 过滤、marker/maxitems）与创建；单资源读取按 `?meta` 返回头部元数据、否则返回 payload（支持 `rOffset`/`rSize` 与 `x-odps-resource-has-remaining`）；PUT 覆盖，DELETE 删除 |
 | POST /projects/p/resources?rIsPart=true；POST/PUT ...?rOpMerge=true | Java SDK 分片上传：分片按确定性临时名 upsert，合并请求体 `<md5>|<part>[,..]` 校验 MD5 与 `x-odps-resource-merge-total-bytes` 后发布正式资源并删除分片 |
 | GET/POST /projects/p/registration/functions；GET/PUT/POST/DELETE .../functions/{name} | 函数列表与注册；别名在 XML 的 `Alias` 元素（兼容 `Name`），引用资源必须已存在 |
@@ -24,9 +27,13 @@ HTTP 分区参数遵循 SDK 的 `ds=2026-09-14` 写法，也接受单引号值�
 
 HTTP 4xx/5xx 按端点返回 JSON 或 XML Code/Message/RequestId；NoSuchTable/NoSuchDownload、InvalidPartition/InvalidParameter/InvalidColumn、InvalidCompression、UnsupportedOperation、ResourceLimit；资源/函数不存在返回 404 NoSuchObject（SDK 的 exists() 依赖该映射），重复创建返回 ResourceAlreadyExists/FunctionAlreadyExists，类型不一致的覆盖返回 InvalidResourceType。
 
+JDBC 驱动对每条语句都会先签一个 logview token，再为实例建立 Tunnel 下载会话（包括没有结果列的 DDL/DML）。因此 `Schema.columns`/`partitionKeys` 必须是数组而不是 `null`：Java 侧 `TunnelTableSchema` 用 `getAsJsonArray` 读取，`null` 会变成 "Not a JSON Array: null" 的 TunnelException。占位 token 只用于拼 logview URL，模拟器仍只按 AK/STS fixture 鉴权（strict 模式见下）。
+
 资源与函数是元数据面：SQL 侧 `CREATE FUNCTION`/`DROP FUNCTION` 与调用 UDF 明确返回 `UnsupportedFeature`，不模拟执行。Volume 资源（`x-odps-copy-file-source`）返回 `UnsupportedOperation`。TABLE 资源只存元数据，下载其 payload 返回 `UnsupportedOperation`。名称按大小写不敏感解析，回读保留上传大小写。单资源 64 MiB、每 project+schema 512 MiB。默认不校验签名；可选 strict 模式校验本地 ODPS v2/v4、STS、日期和 ACL，见 [可靠性配置](reliability.md)。超过并发入口容量返回 503 + Retry-After。
 
 ## 编码
+
+MCQA 子查询直读没有 download session 可查，schema 只能随流走：帧头是 field 1 的 JSON schema（TunnelTableSchema 的 `columns`/`partitionKeys` 形状），后接 SCHEMA_END_TAG 33553920 与该帧自己的 CRC32C（覆盖 field number 的 4 字节小端值与 JSON 字节，不含 tag 与长度 varint），校验和后 CRC 归零，其后的记录部分与下面的 Protobuf 完全一致。响应头 `odps-tunnel-record-count` 是从本次 `rowrange` 起点起还能读到的行数，不是全量结果：Java 的 SessionRecordSetIterator 只取第一次响应的这个数并据此翻页，报大全量会让客户端越过结果末尾继续读取。查询仍在执行时该读取阻塞等待（长轮询），超时返回 Java SDK 认得的 `OdpsTaskTimeout`/“Wait for cache data timeout”，而不是先给一个空流。
 
 Protobuf 按 public SDK 的列序编码，NULL 不写字段。记录结束 tag 33553408 后写 CRC32C，流尾 meta-count 33554430 与 checksum-of-checksums 33554431；CRC 数值按小端逻辑值更新，不包含传输长度和 NULL 标记。DATE 为天数，DATETIME 为毫秒，TIMESTAMP 为秒+纳秒，DECIMAL 为十进制文本。MAP 在引擎边界从 DuckDB OrderedMap 转换，ARRAY/STRUCT 递归编码。
 
@@ -53,6 +60,7 @@ Tunnel Arrow 不是普通带 Schema 消息的 IPC stream：客户端从会话元
 | POST/GET/PUT `/projects/p/tables/t/streams` | 创建/恢复/写 pack；flush 后可见；dynamic_partition 支持逐 pack 分区 |
 | POST/GET/PUT/POST/DELETE `/projects/p/tables/t/upserts` | 创建/恢复/暂存 U/D/提交/中止；支持部分列更新 |
 | POST/GET `/projects/p/instances/i?downloads` / `?downloadid=id` | SQL 实例结果快照与 Tunnel 下载，复用表读取格式 |
+| GET `/projects/p/instances/i?data&cached&taskname=t[&queryid=n][&rowrange=(s,c)][&sizelimit=n][&instance_tunnel_limit_enabled]` | MCQA 子查询结果直读（Java SDK 默认交互取数、JDBC MaxQA 路径）：自带 schema 的 Protobuf 记录流，只支持未压缩 |
 | POST `/api/storage/v2` 或 `/api/storage/v3` | Action + Target 协议；Java 0.61.2-public 实际调用 v3 |
 
 Storage 表 Action：TableCreateReadSession、TableGetReadSession、TableRead、TablePreview、TableCreateWriteSession、TableGetWriteSession、TableCreateWriteStream、TableGetWriteStream、TableWrite、TableCloseWriteStream、TableCommitWriteSession、TableAbortWriteSession。实例 Action：InstanceCreateReadSession、InstanceGetReadSession（GET）、InstanceRead。

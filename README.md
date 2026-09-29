@@ -59,12 +59,36 @@ mvn -B -f tests/java/pom.xml \
 
 Arrow on JDK 17 requires `--add-opens=java.base/java.nio=ALL-UNNAMED`; the test POM sets it. Both endpoints must use the mapped port. Between containers on one Docker network, use the emulator's container DNS name instead of `localhost`.
 
+## JDBC
+
+Point the official driver at the emulator with the same endpoint, project and dummy
+credentials:
+
+```
+jdbc:odps:http://127.0.0.1:8080?project=test_project&accessId=test-ak&accessKey=test-sk&tunnelEndpoint=http://127.0.0.1:8080
+```
+
+`tests/jdbc` runs the published driver (currently `odps-jdbc` 3.10.13, which bundles
+`odps-sdk-core` 0.58.1) against the image, in offline mode:
+
+```bash
+mvn -B -f tests/jdbc/pom.xml \
+  -Demulator.image=maxcompute/maxcompute-emulator:1.1.0 test
+```
+
+The driver signs a logview token and opens a Tunnel download session for **every**
+statement, including `CREATE TABLE` and `INSERT`, which is a stricter contract than the
+SDK path exercises; that is where these checks live. MCQA (`interactiveMode=mcqa`) needs the
+session plane; `interactiveMode=maxqa` is refused by name.
+
+
 ## Supported capabilities
 
 | Area | Implemented subset |
 | --- | --- |
 | SQL | CREATE/DROP/TRUNCATE TABLE, INSERT INTO/OVERWRITE, SELECT/WITH; ODPS grammar validation with DuckDB execution |
 | Metadata | Table identity, schema, primary keys and properties; table listing; STRING partition create/delete/exists/list/pagination; persistent empty partitions |
+| MCQA session (SQLRT) | `Instance/Job/Tasks/SQLRT` creates a session instance that stays `Running` until the client stops it or it idles out; statements arrive as sub queries over the instance information KV (`?info&taskname=...`), with `status` / `progress` / `result_<id>` reads, `query` / `cancel` writes, and the object status codes the Java SDK polls on. A sub query's result is also downloadable over the instance tunnel (`?data&cached&taskname=...&queryid=N`), which is the Java SDK's default fetch and JDBC MaxQA's read path |
 | Resources and functions | File-like resource upload (single payload or Java SDK part + merge), metadata read, download with `rOffset`/`rSize`, update, delete, prefix/paginated listing; TABLE resource metadata; Java/SQL/embedded function registration referencing existing resources |
 | Tunnel | Protobuf and Arrow batch upload/download; stream upload; Upsert/delete/partial updates; instance result download |
 | Storage API v2 | Arrow read/write, Batch/BatchCompatible/Streaming/StreamingRealtime sessions, commit/abort, projections and partition selection |
@@ -77,6 +101,7 @@ See [data transfer](docs/data-transfer.md) and [protocol details](docs/protocol.
 
 This is a local/CI test service. By default authentication signatures and permissions are **not validated**; optional strict mode uses local test credentials; keep it on a trusted test network. It is not a replacement for real MaxCompute acceptance tests.
 
+MCQA sessions cover both of the Java SDK's read paths: the information channel (`SQLExecutor` with `useInstanceTunnel(false)`) answers with CSV whose first line is the column-name header, and the instance tunnel (`?data&cached&taskname=..&queryid=..`, the default fetch and the one JDBC MaxQA uses) answers with a record stream that carries its own schema, so a sub-query result arrives with the same rows and the same types either way. `instance_tunnel_limit_enabled` applies the service's `READ_TABLE_MAX_ROW` (10,000 rows) to that read, `rowrange` pages through it, and `sizelimit` shortens a response instead of failing it. Statements that produce no result set are refused on the tunnel with `InstanceTypeNotSupported`, like the service, so a client confirms them through the session API rather than reading an empty stream. Session-scoped state (variables, temp objects) is not isolated — statements run against the shared engine. Not simulated: named-session attach (a session name is metadata; equal names create separate sessions), MaxQA v2 (`/mcqa` request prefix), compressed or Arrow-encoded sub-query downloads (Protobuf records only), and per-statement statistics.
 Unsupported: Storage v1, Volume/Blob, CDC/incremental reads, filter predicate pushdown, explicit Schema management, column schema evolution, UDF **execution** (functions are registered metadata; SQL `CREATE FUNCTION`/`DROP FUNCTION` and calling a UDF return `UnsupportedFeature`), volume-backed resources, distributed scheduling, and full ODPS SQL semantics.
 
 Resource payloads are capped at 64 MiB each and 512 MiB per project/schema. Resource and function names resolve case-insensitively while the uploaded spelling is what listings return. Unsupported operations return errors rather than cloud behavior being assumed.
@@ -100,6 +125,7 @@ go test -race ./...
 go vet -unreachable=false ./... # generated ANTLR unreachable branches excluded
 docker build --platform linux/amd64 -t maxcompute-emulator:dev .
 mvn -B -f tests/java/pom.xml -Demulator.image=maxcompute-emulator:dev test
+mvn -B -f tests/jdbc/pom.xml -Demulator.image=maxcompute-emulator:dev test
 ```
 
 Native builds require the Go version in `go.mod` and a C/C++ compiler (CGO). The Dockerfile builds inside Linux. [Build notes](docs/build.md) describe module proxies and the optional Zig cross-build path. Generated ANTLR sources are checked in; Java is not needed to build the server. See [grammar provenance](grammar/README.md).

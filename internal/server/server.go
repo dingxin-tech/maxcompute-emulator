@@ -49,6 +49,11 @@ type instance struct {
 	Data                                             engine.Result
 	Project, Schema, ID, Name, Query, Status, Output string
 	Created                                          time.Time
+	// TaskType is the Instance/Job/Tasks element the instance was created from
+	// ("SQL" for a one-shot statement, "SQLRT" for an interactive session).
+	TaskType string
+	// MCQA is non-nil for session instances; it holds the sub-query KV.
+	MCQA *mcqaSession
 }
 type Server struct {
 	Engine    *engine.Engine
@@ -103,7 +108,9 @@ func fail(w http.ResponseWriter, r *http.Request, status int, code string, e err
 	if len(message) > 600 {
 		message = message[:600]
 	}
-	if r.URL.Query().Has("downloads") || r.URL.Query().Has("downloadid") || r.URL.Query().Has("uploads") || r.URL.Query().Has("uploadid") || strings.Contains(r.URL.Path, "/upserts") || strings.Contains(r.URL.Path, "/streams") || strings.Contains(r.URL.Path, "storage") {
+	// `cached` is the direct session-result download, whose client parses a JSON tunnel
+	// error rather than an XML one.
+	if r.URL.Query().Has("downloads") || r.URL.Query().Has("downloadid") || r.URL.Query().Has("uploads") || r.URL.Query().Has("uploadid") || r.URL.Query().Has("cached") || strings.Contains(r.URL.Path, "/upserts") || strings.Contains(r.URL.Path, "/streams") || strings.Contains(r.URL.Path, "storage") {
 		jsonResponse(w, status, map[string]string{"Code": code, "Message": message, "RequestId": w.Header().Get("x-odps-request-id")})
 	} else {
 		w.Header().Set("Content-Type", "application/xml")
@@ -193,7 +200,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "capabilities" {
-		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; ODPS2 subset", "resources": []string{"file", "jar", "py", "archive", "table-metadata"}, "functions": []string{"java-udf-metadata", "sql-function-metadata", "embedded-function-metadata"}, "unsupported": []string{"volume-resources", "sql-udf-execution", "volumes", "mcqa", "catalogapi"}, "auth": s.authDescription(), "test_faults": s.cfg.TestMode, "quotas": append([]string{"default"}, s.cfg.Quotas...)})
+		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; ODPS2 subset", "resources": []string{"file", "jar", "py", "archive", "table-metadata"}, "functions": []string{"java-udf-metadata", "sql-function-metadata", "embedded-function-metadata"}, "mcqa": []string{"sqlrt-session", "subquery-query", "subquery-result", "subquery-cancel", "session-stop", "subquery-instance-tunnel"}, "unsupported": []string{"volume-resources", "sql-udf-execution", "volumes", "mcqa-named-session-attach", "mcqa-v2-maxqa", "catalogapi"}, "auth": s.authDescription(), "test_faults": s.cfg.TestMode, "quotas": append([]string{"default"}, s.cfg.Quotas...)})
+		return
+	}
+	if path == "logview/host" {
+		s.logView(w, r)
+		return
+	}
+	if path == "connection/mcqa" {
+		s.mcqaConnection(w, r)
 		return
 	}
 	parts := strings.Split(path, "/")
@@ -244,6 +259,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.functions(w, r, project, schema, rest[2:])
 		return
 	}
+	if len(rest) == 1 && rest[0] == "authorization" {
+		s.signBearerToken(w, r, project)
+		return
+	}
 	if len(rest) >= 1 && rest[0] == "instances" {
 		s.instance(w, r, project, schema, rest[1:])
 		return
@@ -282,7 +301,7 @@ func tableXML(p, s string, t engine.Table) string {
 	}
 	reserved, _ := json.Marshal(reservedMap)
 	lifecycle, _ := strconv.ParseInt(t.Properties["lifecycle"], 10, 64)
-	b, _ := json.Marshal(map[string]any{"columns": t.Columns, "partitionKeys": t.Partitions, "Reserved": string(reserved), "createTime": t.Created, "lastDDLTime": t.Created, "lastModifiedTime": t.Created, "lifecycle": lifecycle})
+	b, _ := json.Marshal(map[string]any{"columns": asArray(t.Columns), "partitionKeys": asArray(t.Partitions), "Reserved": string(reserved), "createTime": t.Created, "lastDDLTime": t.Created, "lastModifiedTime": t.Created, "lifecycle": lifecycle})
 	return "<Table><Name>" + esc(t.Name) + "</Name><TableId>" + esc(t.ID) + "</TableId><Project>" + esc(p) + "</Project><SchemaName>" + esc(s) + "</SchemaName><Owner>emulator</Owner><Type>MANAGED_TABLE</Type><Schema>" + esc(string(b)) + "</Schema><Comment>" + esc(t.Properties["comment"]) + "</Comment></Table>"
 }
 func (s *Server) table(w http.ResponseWriter, r *http.Request, p, sc, t string) {
@@ -323,10 +342,29 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 						Name  string `xml:"Name"`
 						Query string `xml:"Query"`
 					} `xml:"SQL"`
+					SQLRT []struct {
+						Name   string `xml:"Name"`
+						Config struct {
+							Properties []mcqaProperty `xml:"Property"`
+						} `xml:"Config"`
+					} `xml:"SQLRT"`
 				} `xml:"Tasks"`
 			} `xml:"Job"`
 		}
-		if e := xml.NewDecoder(r.Body).Decode(&req); e != nil || len(req.Job.Tasks.SQL) != 1 {
+		if e := xml.NewDecoder(r.Body).Decode(&req); e != nil {
+			fail(w, r, 400, "InvalidParameter", fmt.Errorf("malformed instance XML"))
+			return
+		}
+		if len(req.Job.Tasks.SQLRT) > 0 {
+			if len(req.Job.Tasks.SQL) > 0 {
+				fail(w, r, 400, "InvalidParameter", fmt.Errorf("one task type per instance"))
+				return
+			}
+			rt := req.Job.Tasks.SQLRT[0]
+			s.mcqaCreate(w, r, p, sc, rt.Name, mcqaTaskSettings(rt.Config.Properties))
+			return
+		}
+		if len(req.Job.Tasks.SQL) != 1 {
 			fail(w, r, 400, "InvalidParameter", fmt.Errorf("one SQL task in Instance/Job/Tasks required"))
 			return
 		}
@@ -380,15 +418,52 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 		s.instanceDownload(w, r, p, sc, rest[0])
 		return
 	}
-	if len(rest) != 1 || r.Method != "GET" {
+	// A session sub query is read straight off the instance: the Java SDK's direct
+	// download arrives as GET ?data&cached&taskname=.., with no download id to look up.
+	if len(rest) == 1 && r.Method == http.MethodGet && r.URL.Query().Has("data") &&
+		(r.URL.Query().Has("cached") || r.URL.Query().Has("taskname")) {
+		s.mcqaDirectDownload(w, r, p, sc, rest[0])
+		return
+	}
+	if len(rest) != 1 || r.Method != "GET" && r.Method != "PUT" {
 		fail(w, r, 400, "UnsupportedOperation", fmt.Errorf("unsupported instance operation"))
 		return
 	}
 	s.mu.Lock()
 	i := s.instances[rest[0]]
 	s.mu.Unlock()
-	if i == nil || i.Project != p || i.Schema != sc || i.Status == "Running" || time.Since(i.Created) > s.cfg.SessionTTL {
+	if i == nil || i.Project != p || i.Schema != sc {
 		fail(w, r, 404, "NoSuchInstance", fmt.Errorf("unknown instance"))
+		return
+	}
+	if r.URL.Query().Has("info") {
+		s.mcqaInfo(w, r, i)
+		return
+	}
+	if r.Method == "PUT" {
+		if i.MCQA == nil {
+			fail(w, r, 400, "UnsupportedOperation", fmt.Errorf("only SQLRT session instances can be stopped"))
+			return
+		}
+		s.mcqaStop(w, r, i)
+		return
+	}
+	s.mu.Lock()
+	expired := s.mcqaIdle(i)
+	if expired {
+		delete(s.instances, i.ID)
+	}
+	s.mu.Unlock()
+	if expired {
+		fail(w, r, 404, "NoSuchInstance", fmt.Errorf("unknown instance"))
+		return
+	}
+	if i.MCQA == nil && (i.Status == "Running" || time.Since(i.Created) > s.cfg.SessionTTL) {
+		fail(w, r, 404, "NoSuchInstance", fmt.Errorf("unknown instance"))
+		return
+	}
+	if i.MCQA != nil {
+		s.mcqaInstanceXML(w, i)
 		return
 	}
 	now := i.Created.UTC().Format(http.TimeFormat)
@@ -409,13 +484,20 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 const maxInstanceBytes int64 = 512 << 20
 
 func instanceBytes(i *instance) int64 {
-	return i.Data.Bytes + int64(len(i.Query)+len(i.Output))
+	return i.Data.Bytes + i.MCQA.bytes() + int64(len(i.Query)+len(i.Output))
 }
 
 func (s *Server) reserveInstance(i *instance) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for key, old := range s.instances {
+		if old.MCQA != nil {
+			// Sessions age out on idle time, not on creation time.
+			if s.mcqaIdle(old) {
+				delete(s.instances, key)
+			}
+			continue
+		}
 		if old.Status != "Running" && time.Since(old.Created) > s.cfg.SessionTTL {
 			delete(s.instances, key)
 		}
@@ -497,8 +579,21 @@ func (s *Server) createDownload(w http.ResponseWriter, r *http.Request, p, sc, t
 	}
 	jsonResponse(w, 200, sessionJSON(sess))
 }
+
+// asArray substitutes an empty slice for a nil one. encoding/json writes a nil slice as
+// `null`, and the Java SDK reads schema members with JsonObject#getAsJsonArray, which
+// throws "Not a JSON Array: null" — reported to the caller as a TunnelException with
+// nothing to suggest the real cause. A result with no columns is normal: every DDL and
+// every INSERT is one, and the JDBC driver opens a download session for them too.
+func asArray[T any](v []T) []T {
+	if v == nil {
+		return []T{}
+	}
+	return v
+}
+
 func sessionJSON(s *session) map[string]any {
-	return map[string]any{"DownloadID": s.ID, "RecordCount": len(s.Data.Rows), "Status": "normal", "Owner": "emulator", "Initiated": s.Created.UTC().Format(time.RFC3339), "Schema": map[string]any{"columns": s.Meta.Columns, "partitionKeys": s.Meta.Partitions, "IsVirtualView": false}, "QuotaName": s.Quota}
+	return map[string]any{"DownloadID": s.ID, "RecordCount": len(s.Data.Rows), "Status": "normal", "Owner": "emulator", "Initiated": s.Created.UTC().Format(time.RFC3339), "Schema": map[string]any{"columns": asArray(s.Meta.Columns), "partitionKeys": asArray(s.Meta.Partitions), "IsVirtualView": false}, "QuotaName": s.Quota}
 }
 func (s *Server) download(w http.ResponseWriter, r *http.Request, p, sc, t string) {
 	q := r.URL.Query()

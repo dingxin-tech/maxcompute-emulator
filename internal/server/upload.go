@@ -298,7 +298,7 @@ func writeJSON(v *writeSession, host string) map[string]any {
 	for i, c := range v.Meta.Columns {
 		columns = append(columns, map[string]any{"name": c.Name, "type": c.Type, "nullable": c.Nullable, "comment": c.Comment, "column_id": i})
 	}
-	schema := map[string]any{"columns": columns, "partitionKeys": v.Meta.Partitions}
+	schema := map[string]any{"columns": asArray(columns), "partitionKeys": asArray(v.Meta.Partitions)}
 	if v.Kind == "stream" {
 		return map[string]any{"session_name": v.ID, "schema": schema, "schema_version": "1", "slots": [][]string{{"0", host}}, "status": v.Status, "quota_name": v.Quota}
 	}

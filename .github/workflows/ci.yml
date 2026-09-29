@@ -17,13 +17,17 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: maven
-          cache-dependency-path: tests/java/pom.xml
+          cache-dependency-path: |
+            tests/java/pom.xml
+            tests/jdbc/pom.xml
       - name: Go validation in Linux container
         run: |
           docker build --platform linux/amd64 --target build -t emulator-build .
           docker run --rm emulator-build sh -c 'go test -race ./... && go vet -unreachable=false ./...'
       - run: docker build --platform linux/amd64 -t maxcompute-emulator:ci .
       - run: mvn -B -f tests/java/pom.xml -Demulator.image=maxcompute-emulator:ci test
+      - name: Official JDBC driver acceptance
+        run: mvn -B -f tests/jdbc/pom.xml -Demulator.image=maxcompute-emulator:ci test
       - name: Set up Python for the PyODPS consumer probe
         uses: actions/setup-python@v5
         with:
