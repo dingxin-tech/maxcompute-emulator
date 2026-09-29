@@ -12,6 +12,7 @@ package server
 
 import (
 	"encoding/json"
+	"github.com/dingxin-tech/maxcompute-emulator/internal/engine"
 	"strings"
 )
 
@@ -56,23 +57,92 @@ func fmtSprint(v any) string {
 	return strings.Trim(string(s), `"`)
 }
 
-// isSelectStatement is the emulator's stand-in for the planner's own select check: every
-// statement in the submission has to start with SELECT or WITH, ignoring comments and the
-// parentheses a client may wrap a query in. It is deliberately conservative in the
-// direction that costs nothing to be wrong about — anything it does not recognise is run
-// offline by the client instead of twice by the session.
+// isSelectStatement checks the same tokens the engine will execute. WITH is a
+// prefix shared by queries and writes, so inspect the statement after its CTEs.
 func isSelectStatement(sql string) bool {
 	statements := sqlStatements(sql)
 	if len(statements) == 0 {
 		return false
 	}
 	for _, statement := range statements {
-		head := strings.TrimLeft(statement, "( \t\n")
-		if !strings.HasPrefix(head, "select") && !strings.HasPrefix(head, "with") {
+		// The session accepts harmless client wrappers; the engine parser expects
+		// the statement itself. Comments have been removed by sqlStatements.
+		for strings.HasPrefix(statement, "(") && strings.HasSuffix(statement, ")") {
+			statement = strings.TrimSpace(statement[1 : len(statement)-1])
+		}
+		parsed, err := engine.Lex(statement)
+		if err != nil || len(parsed) != 1 || !selectTokens(parsed[0]) {
 			return false
 		}
 	}
 	return true
+}
+
+func selectTokens(tokens []string) bool {
+	// Strip balanced parentheses surrounding an entire query.
+	for len(tokens) > 0 && tokens[0] == "(" {
+		end := closingParen(tokens, 0)
+		if end != len(tokens)-1 {
+			return false
+		}
+		tokens = tokens[1:end]
+	}
+	if len(tokens) == 0 {
+		return false
+	}
+	if strings.EqualFold(tokens[0], "select") {
+		return true
+	}
+	if !strings.EqualFold(tokens[0], "with") {
+		return false
+	}
+	pos := 1
+	if pos < len(tokens) && strings.EqualFold(tokens[pos], "recursive") {
+		pos++
+	}
+	for pos < len(tokens) {
+		pos++ // CTE name; syntax has already been checked by Lex.
+		if pos < len(tokens) && tokens[pos] == "(" {
+			pos = closingParen(tokens, pos) + 1 // optional column names
+			if pos == 0 {
+				return false
+			}
+		}
+		if pos >= len(tokens) || !strings.EqualFold(tokens[pos], "as") {
+			return false
+		}
+		pos++
+		if pos >= len(tokens) || tokens[pos] != "(" {
+			return false
+		}
+		end := closingParen(tokens, pos)
+		if end < 0 || !selectTokens(tokens[pos+1:end]) {
+			return false
+		}
+		pos = end + 1
+		if pos < len(tokens) && tokens[pos] == "," {
+			pos++
+			continue
+		}
+		return selectTokens(tokens[pos:])
+	}
+	return false
+}
+
+func closingParen(tokens []string, start int) int {
+	depth := 0
+	for i := start; i < len(tokens); i++ {
+		switch tokens[i] {
+		case "(":
+			depth++
+		case ")":
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // sqlStatements returns the lower-cased text of each statement in a submission with

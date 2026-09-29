@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -46,9 +47,15 @@ func TestIsSelectStatement(t *testing.T) {
 		{"select 1", true},
 		{"  SELECT id FROM t", true},
 		{"with x as (select 1 as a) select * from x", true},
+		{"with x(a) as (select 1), y as (select a from x) select * from y", true},
+
+		{"select ';' as x; insert into t values (1)", false},
 		{"(select 1)", true},
 		{"-- a leading comment\nselect 1", true},
 		{"/* hint */ select 1", true},
+		{"with x as (select 1) insert into t select * from x", false},
+		{"with x as (select 1) delete from t", false},
+		{"selective", false},
 		{"create table t(a int)", false},
 		{"insert into t values (1)", false},
 		{"truncate table t", false},
@@ -109,6 +116,25 @@ func TestSessionCreateSettingLiftsSelectOnlyForEveryStatement(t *testing.T) {
 	id := createSession(t, h, `{"`+mcqaSelectOnlyKey+`":"false","odps.sql.session.name":"wide"}`)
 	if subQueryID, _ := submitStatementWithSettings(t, h, id, "create table wide_session(a bigint)", nil); subQueryID != 1 {
 		t.Fatalf("the session-level setting should apply without a per-statement one, got id=%d", subQueryID)
+	}
+}
+
+func TestSessionRefusesCTEInsertWithoutRunningIt(t *testing.T) {
+	e, h := fixture(t, Config{SessionTTL: time.Hour})
+	if _, err := e.Engine.Execute(context.Background(), "p", "default", "create table cte_target(a bigint)"); err != nil {
+		t.Fatal(err)
+	}
+	id := createSession(t, h, "")
+	qid, ir := submitStatementWithSettings(t, h, id, "with x as (select 1 as a) insert into cte_target select a from x", nil)
+	if qid != -1 {
+		t.Errorf("CTE INSERT must be refused before execution: id=%d response=%+v", qid, ir)
+	}
+	rows, err := e.Engine.Execute(context.Background(), "p", "default", "select * from cte_target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows.Rows) != 0 {
+		t.Errorf("refused INSERT changed table: %v", rows.Rows)
 	}
 }
 
