@@ -70,7 +70,11 @@ type mcqaQuery struct {
 // mcqaSession is the state behind a SQLRT instance. Fields are guarded by Server.mu;
 // statement execution runs outside that lock (see runSubQuery).
 type mcqaSession struct {
-	name       string
+	name string
+	// selectOnly is the session's promise that nothing but a whole select runs here.
+	// The service defaults it to true; a client that wants DDL or DML inside the session
+	// says so with odps.sql.session.select.only.
+	selectOnly bool
 	live       bool
 	nextID     int
 	lastID     int
@@ -79,8 +83,8 @@ type mcqaSession struct {
 	lastActive time.Time
 }
 
-func newMCQASession(name string) *mcqaSession {
-	return &mcqaSession{name: name, live: true, queries: map[int]*mcqaQuery{}, lastActive: time.Now()}
+func newMCQASession(name string, selectOnly bool) *mcqaSession {
+	return &mcqaSession{name: name, selectOnly: selectOnly, live: true, queries: map[int]*mcqaQuery{}, lastActive: time.Now()}
 }
 
 // expired reports whether the session has been idle past the configured TTL. Idle, not
@@ -174,7 +178,7 @@ func (s *Server) mcqaCreate(w http.ResponseWriter, r *http.Request, p, sc, taskN
 	i := &instance{
 		Project: p, Schema: sc, ID: id(), Name: taskName, TaskType: "SQLRT",
 		Status: "Running", Created: time.Now(),
-		MCQA: newMCQASession(name),
+		MCQA: newMCQASession(name, !sessionRunsNonSelect(mcqaSettingsMap(settings))),
 	}
 	if !s.reserveInstance(i) {
 		fail(w, r, 429, "ResourceLimit", fmt.Errorf("instance limit"))
@@ -298,6 +302,18 @@ func (s *Server) mcqaSetInfo(w http.ResponseWriter, r *http.Request, i *instance
 		if e := json.Unmarshal([]byte(req.Value), &sub); e != nil || strings.TrimSpace(sub.Query) == "" {
 			s.mu.Unlock()
 			s.informationReply(w, mcqaInfoFailed, "Invalid sub query payload")
+			return
+		}
+		if m.selectOnly && !sessionRunsNonSelect(sub.Settings) && !isSelectStatement(sub.Query) {
+			// Refuse before running anything. A client that only learns the statement
+			// was not a select when it comes to fetch the result reruns it offline —
+			// and an INSERT that already ran in the session then applies twice. queryId
+			// -1 with status ok is how the service reports a sub query it declined to
+			// start, and the message is the pair FallbackPolicy matches on ("ODPS-185"),
+			// which is what turns the refusal into an offline rerun rather than an error.
+			s.mu.Unlock()
+			payload, _ := json.Marshal(map[string]any{"queryId": -1, "status": mcqaInfoOK, "result": mcqaSelectOnlyRefusal})
+			s.informationReply(w, mcqaInfoOK, string(payload))
 			return
 		}
 		m.nextID++
