@@ -26,6 +26,8 @@ jobs:
           docker run --rm emulator-build sh -c 'go test -race ./... && go vet -unreachable=false ./...'
       - run: docker build --platform linux/amd64 -t maxcompute-emulator:ci .
       - run: mvn -B -f tests/java/pom.xml -Demulator.image=maxcompute-emulator:ci test
+      - name: Legacy Java SDK offline SQL result regression
+        run: mvn -B -f tests/java/pom.xml -Plegacy-sql-sdk -Demulator.image=maxcompute-emulator:ci clean test
       - name: Official JDBC driver acceptance
         run: mvn -B -f tests/jdbc/pom.xml -Demulator.image=maxcompute-emulator:ci test
       - name: Set up Python for the PyODPS consumer probe
