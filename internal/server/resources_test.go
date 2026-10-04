@@ -180,9 +180,10 @@ func TestResourceRESTContract(t *testing.T) {
 	if w.Code != 404 {
 		t.Fatalf("parts must be cleaned after merge: %d %s", w.Code, w.Body.String())
 	}
-	// A mismatching digest or byte count must not publish a partial payload, and
-	// the merge consumes the chunk it assembled from: an unverifiable part is
-	// dead weight, and both SDKs re-upload the same deterministic name on retry.
+	// A mismatching digest must not publish a partial payload, and the merge consumes the
+	// chunk it assembled from. That matches the live service: a refused digest leaves both
+	// part resources gone (measured on three_pangu2_odps2, 2026-10-04 19:23), which is what
+	// makes the retry-cost note in resources.go worth reading before changing this.
 	for _, body := range []string{md5hex("nope") + "|" + partB, "0123456789abcdef0123456789abcdef|" + partB} {
 		resourceRequest(t, s, "POST", "/projects/p/resources?rIsPart=true", partB, "file", temp, "x")
 		w = resourceRequest(t, s, "POST", "/projects/p/resources?rOpMerge=true", "bad.py", "py", nil, body)
@@ -200,6 +201,14 @@ func TestResourceRESTContract(t *testing.T) {
 	w = resourceRequest(t, s, "POST", "/projects/p/resources?rOpMerge=true", "bad.py", "py", map[string]string{"x-odps-resource-merge-total-bytes": "99"}, md5hex("x")+"|"+partB)
 	if w.Code != 400 || !strings.Contains(w.Body.String(), "merge-total-bytes") {
 		t.Fatalf("declared size: %d %s", w.Code, w.Body.String())
+	}
+	// The emulator is stricter than the service here: the service never compares the
+	// declared byte count with what it assembled (measured: declaring 4400 for a 304-byte
+	// merge is accepted), so there is no service precedent for what it does with the parts
+	// on this path. It keeps them, and that is asserted rather than assumed - the whole
+	// point is that this emulator does not destroy an upload on a check the service lacks.
+	if w = resourceRequest(t, s, "GET", "/projects/p/resources/"+partB, "", "", nil, ""); w.Code != 200 {
+		t.Fatalf("a refusal on the emulator's own stricter check must keep the client's part: %d %s", w.Code, w.Body.String())
 	}
 	w = resourceRequest(t, s, "POST", "/projects/p/resources?rOpMerge=true", "bad.py", "py", nil, md5hex("x")+"|absent_part")
 	if w.Code != 404 || !strings.Contains(w.Body.String(), "NoSuchObject") {

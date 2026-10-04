@@ -9,6 +9,7 @@
 - Add function registration (`/projects/p/registration/functions`) for Java, SQL and embedded functions with resource-reference validation; execution still returns `UnsupportedFeature`.
 - Declare `resources`, `functions` and `unsupported` surfaces in `/capabilities`.
 - Reject volume-backed resources and chunked-upload integrity mismatches with structured errors instead of publishing partial payloads.
+- Follow the live service on what happens to a chunked upload's part resources after a merge is refused (measured 2026-10-04 on a real project, read-backs in the repo's probe): a merge rejected on its MD5 consumes the parts it read, a merge refused before any part was read keeps them, and the emulator's own stricter declared-byte-count check - which the service does not perform at all - keeps them too.
 - Extend test-mode fault injection to the metadata plane: `"plane":"rest"` rules match resources or functions by request verb and can inject `http_error` or `delay` without touching Tunnel sessions.
 - Log resources and functions requests as a separate `rest` event with action, object and project, keeping object names out of the log stream.
 - Require write grants to create or update resources and functions under strict authentication; the Tunnel read-session `create` exception no longer applies to metadata verbs.

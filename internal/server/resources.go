@@ -239,15 +239,24 @@ func (s *Server) putResourcePart(w http.ResponseWriter, r *http.Request, p, sc, 
 // body is "<md5-hex>|<part>[,<part>...]"; the digest and the declared total
 // bytes are both verified before the payload becomes visible.
 //
-// A merge consumes the parts it declared, whether or not the target ends up
-// published: a payload that fails verification is rejected together with the
-// chunks it was built from, so a client that retries (the SDKs reuse
-// deterministic part names) never finds a stale chunk in the way, and a
-// session that gives up does not leave litter behind. Requests that were
-// refused before any part was read keep the parts untouched: a malformed
-// manifest names nothing to consume, a missing part is a refusal about that
-// part, and creating over an existing resource is decided before the merge
-// runs.
+// What happens to the part resources is pinned against a live MaxCompute project
+// (three_pangu2_odps2, 2026-10-04 19:23-19:26 CST, temp resources created and deleted by
+// the probe; raw read-backs in the workspace work item evidence):
+//
+//   - a merge that publishes consumes its parts;
+//   - a merge refused because the assembled payload does not match the declared MD5 also
+//     consumes them - the service answers ODPS-0421213 and both parts are gone when read
+//     back, so retrying with the same deterministic part names means re-uploading them;
+//   - a merge refused before any part was read keeps them: naming an absent part is
+//     ODPS-0421111 with the uploaded part still present, and creating over an existing
+//     resource is ODPS-0421121 with both parts still present.
+//
+// The declared byte count is the one deliberate difference below. The service does not
+// compare it with the assembled payload at all (measured: declaring 4400 bytes for a
+// 304-byte merge is accepted and merges correctly; it only checks the value against the
+// project's maximum), so this emulator rejecting the mismatch is stricter than the
+// service. Because no service behaviour covers a failure the service cannot produce, the
+// parts are left alone on that path rather than consumed on an invented precedent.
 func (s *Server) mergeResourceParts(w http.ResponseWriter, r *http.Request, p, sc, name string, mode engine.ResourceMode) {
 	target, ok := s.resourceTarget(w, r, name)
 	if !ok {
@@ -290,8 +299,9 @@ func (s *Server) mergeResourceParts(w http.ResponseWriter, r *http.Request, p, s
 	if size := r.Header.Get("x-odps-resource-merge-total-bytes"); size != "" {
 		declared, e := strconv.ParseInt(size, 10, 64)
 		if e != nil || declared != int64(len(merged)) {
+			// Stricter than the service, and therefore no precedent for consuming parts:
+			// keep everything the client uploaded so it can correct the header and retry.
 			fail(w, r, 400, "InvalidParameter", fmt.Errorf("x-odps-resource-merge-total-bytes does not match the merged payload"))
-			consumeParts()
 			return
 		}
 	}
