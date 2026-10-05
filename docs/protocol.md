@@ -20,7 +20,7 @@
 | POST /projects/p/authorization?sign_bearer_token | `<Authorization><Result>` 占位 token，按请求生成；不参与鉴权 |
 | GET /connection/mcqa | 固定 404 UnsupportedOperation，消息写明只模拟 SQLRT（MCQA v2/MaxQA 未实现） |
 | GET/POST /projects/p/resources；GET/PUT/POST/DELETE /projects/p/resources/{name} | 资源列表（name 前缀、type 过滤、marker/maxitems）与创建；单资源读取按 `?meta` 返回头部元数据、否则返回 payload（支持 `rOffset`/`rSize` 与 `x-odps-resource-has-remaining`）；PUT 覆盖，DELETE 删除 |
-| POST /projects/p/resources?rIsPart=true；POST/PUT ...?rOpMerge=true | Java SDK 分片上传：分片按确定性临时名 upsert，合并请求体 `<md5>|<part>[,..]` 校验 MD5 与 `x-odps-resource-merge-total-bytes` 后发布正式资源并删除分片 |
+| POST /projects/p/resources?rIsPart=true；POST/PUT ...?rOpMerge=true | Java SDK 分片上传：分片按确定性临时名 upsert；合并请求体 `<md5>|<part>[,..]` 以 MD5 为准，成功后发布正式资源并删除分片。分片生命周期按 2026-10-04 真实项目实测对齐：MD5 不符的合并连分片一起拒掉（分片被消费，重试必须重传）；读取分片之前就定案的拒绝（目标已存在、manifest 里点名了不存在的分片）保留分片。`x-odps-resource-merge-total-bytes` 与实配合并长度的比对是本模拟器比服务端更严的本地检查（服务端只做上限校验，实测申报 4400 字节、实际 304 字节的合并被接受且内容正确），因此该路径不消费分片。目标已存在时服务端回 `ODPS-0421121 The resource has already existed`（HTTP 状态未回读），模拟器回 400 InvalidParameter——这个状态差异是既有行为，不在本次改动范围内 |
 | GET/POST /projects/p/registration/functions；GET/PUT/POST/DELETE .../functions/{name} | 函数列表与注册；别名在 XML 的 `Alias` 元素（兼容 `Name`），引用资源必须已存在 |
 
 HTTP 分区参数遵循 SDK 的 `ds=2026-09-14` 写法，也接受单引号值；SQL 中使用 `PARTITION(ds='2026-09-14')`。当前逗号是分区键分隔符，不支持分区值本身包含逗号。quotaName 解析到 default 或显式配置的命名 quota；不存在的命名 quota 返回 404 QuotaNotExist，不执行生产配额调度，asyncmode 接受后同步建立快照。Protobuf 的 raw_size 参数不裁剪行数；当前 CPP 只在 Arrow 路径发送它。

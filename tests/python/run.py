@@ -132,6 +132,15 @@ def quiet(fn, *args, **kw):
 
 
 def cleanup():
+    # A part left behind by an aborted run of *this* probe would otherwise be
+    # attributed to the next one. Sweep them by our own prefix, so the cleanup
+    # can never touch another client's in-flight upload.
+    try:
+        stale = [r.name for r in odps.list_resources(prefix=PREFIX) if ".part.tmp." in r.name]
+    except Exception:
+        stale = []
+    for stale_part in stale:
+        quiet(odps.delete_resource, stale_part)
     for suffix in ("single.py", "bytes.bin", "sio.txt", "chunk.bin", "upd.bin", "schema.bin",
                    "big.bin", "local.txt", "streamres.bin", "onlyschema.bin", "malformed.bin", "malformed2.bin",
                    "badmd5.bin", "paged_%02d.bin"):
@@ -203,8 +212,13 @@ def stream_write():
     eq(fresh.size, len(BLOB), "merged size")
     eq(fresh.open("rb").read(), BLOB, "merged payload")
     eq(fresh.content_md5, hashlib.md5(BLOB).hexdigest(), "merged md5")
-    leftovers = [r.name for r in odps.list_resources() if ".part.tmp." in r.name]
-    eq(leftovers, [], "temp parts removed after merge")
+    # Scope the sweep to this case's own resource: a temp part left behind by a
+    # different client (a refused duplicate create keeps the chunks it uploaded,
+    # which is the service behaviour the probe pins further down) is not a
+    # regression in *our* merge, and asserting project-wide made this case depend
+    # on what else had run against the instance before it.
+    leftovers = [r.name for r in odps.list_resources(prefix=PREFIX + "_big.bin") if ".part.tmp." in r.name]
+    eq(leftovers, [], "this resource's temp parts removed after merge")
     return "size=%d md5=verified parts_left=%d" % (fresh.size, len(leftovers))
 
 
@@ -417,6 +431,88 @@ def merge_with_broken_manifest():
 case("a merge body that is not a manifest is refused", merge_with_broken_manifest)
 
 
+def parts_after_refusal(name, digest, declared, upload_part=True, precreate=False):
+    """Upload one part, refuse the merge, and report what happened to that part.
+
+    The three refusals below are the shapes measured against a live MaxCompute project on
+    2026-10-04 (raw read-backs in the workspace work item's evidence). The probe asserts the
+    emulator's answer in each case, so the difference between "the service consumed it" and
+    "the emulator kept it" is a checked fact rather than someone's recollection.
+    """
+    if precreate:
+        try:
+            odps.delete_resource(name)
+        except Exception:
+            pass
+        odps.create_resource(name, "file", fileobj=b"already-here", temp=True)
+    part = name + ".part.tmp.probe.0"
+    headers = {"Content-Type": "application/octet-stream", "x-odps-resource-type": "file",
+               "x-odps-resource-name": part, "x-odps-resource-istemp": "true"}
+    raw("/projects/%s/resources?rIsPart&curr_project=%s" % (PROJECT, PROJECT), method="POST",
+        body=BLOB[:CHUNK], headers=headers)
+    manifest = (digest + "|" + part).encode()
+    merge_headers = {"Content-Type": "application/octet-stream", "x-odps-resource-type": "file",
+                     "x-odps-resource-name": name,
+                     "x-odps-resource-merge-total-bytes": str(declared)}
+    code, body, _ = raw_error("/projects/%s/resources?rOpMerge&curr_project=%s" % (PROJECT, PROJECT),
+                              method="POST", body=manifest, headers=merge_headers)
+    kept = odps.exist_resource(part)
+    for leftover in (part, name):
+        try:
+            odps.delete_resource(leftover)
+        except Exception:
+            pass
+    return code, body, kept
+
+
+def merge_wrong_digest_consumes_the_part():
+    name = PREFIX + "_consumed.bin"
+    code, body, kept = parts_after_refusal(name, hashlib.md5(b"wrong").hexdigest(), CHUNK)
+    eq(code, 400, "status")
+    eq("MD5" in body, True, "reason mentions the digest")
+    # Measured on the service: a merge rejected on the digest also drops the parts it read.
+    eq(kept, False, "the refused merge consumed the part, as the service does")
+    return "400, part consumed"
+
+
+case("a digest-refused merge consumes its part, like the service", merge_wrong_digest_consumes_the_part)
+
+
+def merge_target_exists_keeps_the_part():
+    name = PREFIX + "_dupmerge.bin"
+    code, body, kept = parts_after_refusal(name, hashlib.md5(BLOB[:CHUNK]).hexdigest(), CHUNK,
+                                           precreate=True)
+    # What the case asserts is the part lifecycle, not the status code: the service answers
+    # this request with `ODPS-0421121 The resource has already existed` (its HTTP status was
+    # not read back here), the emulator answers 400 InvalidParameter. That difference is
+    # pre-existing and out of this change's scope; both refuse before reading a part.
+    eq(200 <= code < 300, False, "the merge over an existing target is refused (%s %s)" % (code, body[:60]))
+    # Measured on the service: the refusal is decided before any part is read, so the part
+    # survives and the client can re-point the merge at another name.
+    eq(kept, True, "the part survived a refusal decided before it was read")
+    return "%s, part kept" % code
+
+
+case("a merge refused over an existing target keeps its part", merge_target_exists_keeps_the_part)
+
+
+def merge_declared_bytes_mismatch_keeps_the_part():
+    name = PREFIX + "_declared.bin"
+    digest = hashlib.md5(BLOB[:CHUNK]).hexdigest()
+    code, body, kept = parts_after_refusal(name, digest, CHUNK + 4096)
+    eq(code, 400, "status")
+    eq("merge-total-bytes" in body, True, "reason names the header")
+    # The service has no such check at all - declaring the wrong total with a correct digest
+    # is accepted there and the merge lands. So this emulator is stricter, and it must not
+    # destroy the upload on a failure the service cannot produce: the part stays.
+    eq(kept, True, "the emulator's own stricter check does not eat the client's upload")
+    return "400 (stricter than the service), part kept"
+
+
+case("a declared-byte-count refusal keeps the part (emulator-only strictness)",
+     merge_declared_bytes_mismatch_keeps_the_part)
+
+
 def merge_with_wrong_md5():
     name = PREFIX + "_badmd5.bin"
     odps.create_resource(name, "file", fileobj=b"seed")
@@ -432,11 +528,13 @@ def merge_with_wrong_md5():
     eq(code, 400, "status")
     eq("MD5" in body, True, "reason mentions MD5")
     eq(odps.get_resource(name).open("rb").read(), b"seed", "previous payload survives")
-    # a refused merge must leave the parts alone (they are not the client's to keep)
-    eq(any(".part.tmp." in r.name for r in odps.list_resources(prefix=name)), True, "part kept after refusal")
-    quiet(odps.delete_resource, name + ".part.tmp.000001.000000")
+    # The merge got as far as assembling the payload and then rejected it, so the
+    # chunk it consumed is gone with it; only refusals decided before any part was
+    # read (a duplicate create, a malformed manifest) keep the parts.
+    eq([r.name for r in odps.list_resources(prefix=name) if ".part.tmp." in r.name], [],
+       "part consumed by the refused merge")
     odps.delete_resource(name)
-    return "400 on MD5 mismatch, old payload intact"
+    return "400 on MD5 mismatch, old payload intact, part consumed"
 
 
 case("a merge whose MD5 does not match is refused", merge_with_wrong_md5)
