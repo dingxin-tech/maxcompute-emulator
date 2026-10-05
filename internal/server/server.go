@@ -395,6 +395,14 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 		} else {
 			var b bytes.Buffer
 			cw := csv.NewWriter(&b)
+			// SQLTask.getResult consumes the first CSV record as column names.
+			if len(res.Columns) > 0 {
+				header := make([]string, len(res.Columns))
+				for n, c := range res.Columns {
+					header[n] = c.Name
+				}
+				cw.Write(header)
+			}
 			for _, row := range res.Rows {
 				line := make([]string, len(row))
 				for n, v := range row {

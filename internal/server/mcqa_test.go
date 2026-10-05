@@ -2,11 +2,15 @@ package server
 
 import (
 	"bytes"
+	"context"
+	"encoding/csv"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -332,5 +336,52 @@ func TestMCQASessionIdleExpiry(t *testing.T) {
 	code, _, b := request(t, h, "GET", "/projects/p/instances/"+id, "")
 	if code != 404 || !strings.Contains(string(b), "NoSuchInstance") {
 		t.Fatalf("idle session must expire: code=%d body=%s", code, b)
+	}
+}
+
+// Offline SQL results must include the CSV schema line consumed by SQLTask.getResult.
+func TestOfflineSQLResultCSV(t *testing.T) {
+	s, h := fixture(t, Config{})
+	if _, err := s.Engine.Execute(context.Background(), "p", "default", "insert overwrite table t values (1,'one'),(2,'two'),(3,'three')"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, query string
+		want        [][]string
+	}{
+		{"three rows", "select id, s from t order by id", [][]string{{"id", "s"}, {"1", "one"}, {"2", "two"}, {"3", "three"}}},
+		{"empty select", "select id, s from t where id = 99", [][]string{{"id", "s"}}},
+		{"escaped names and values", "select 'value,one' as `a,b`, 'value\"two' as `a\"b`, 'line\nvalue' as `line\nname`, cast(null as string) as missing, '' as blank, '<&>' as xml", [][]string{{"a,b", `a"b`, "line\nname", "missing", "blank", "xml"}, {"value,one", `value"two`, "line\nvalue", `\N`, "", "<&>"}}},
+		{"non query", "create table csv_empty(id bigint)", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `<Instance><Job><Tasks><SQL><Name>csv_task</Name><Query>` + esc(tc.query) + `</Query></SQL></Tasks></Job></Instance>`
+			code, header, b := mcqaCall(t, h, "POST", "/projects/p/instances", []byte(body))
+			if code != 201 {
+				t.Fatalf("create: %d %s", code, b)
+			}
+			code, _, b = mcqaCall(t, h, "GET", header.Get("Location")+"?result", nil)
+			if code != 200 {
+				t.Fatalf("result: %d %s", code, b)
+			}
+			var result struct {
+				Tasks struct {
+					Task struct{ Status, Result string }
+				}
+			}
+			if err := xml.Unmarshal(b, &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Tasks.Task.Status != "Success" {
+				t.Fatalf("failed SQL: %s", b)
+			}
+			got, err := csv.NewReader(strings.NewReader(result.Tasks.Task.Result)).ReadAll()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("CSV = %#v, want %#v", got, tc.want)
+			}
+		})
 	}
 }

@@ -9,12 +9,12 @@
     <maven.compiler.target>17</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <!-- Docker 29 rejects docker-java's default API 1.32. -->
+    <odps.core.version>0.61.2-public</odps.core.version>
     <docker.api.version>1.44</docker.api.version>
   </properties>
   <dependencies>
-    <dependency><groupId>com.aliyun.odps</groupId><artifactId>odps-sdk-storage-api</artifactId><version>0.61.2-public</version></dependency>
     <dependency>
-      <groupId>com.aliyun.odps</groupId><artifactId>odps-sdk-core</artifactId><version>0.61.2-public</version>
+      <groupId>com.aliyun.odps</groupId><artifactId>odps-sdk-core</artifactId><version>${odps.core.version}</version>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.10.2</version><scope>test</scope>
@@ -37,4 +37,28 @@
       </plugin>
     </plugins>
   </build>
+  <profiles>
+    <profile>
+      <id>storage-sdk</id>
+      <activation><activeByDefault>true</activeByDefault></activation>
+      <dependencies>
+        <dependency><groupId>com.aliyun.odps</groupId><artifactId>odps-sdk-storage-api</artifactId><version>0.61.2-public</version></dependency>
+      </dependencies>
+    </profile>
+    <!-- Compile only the offline API regression against SeaTunnel's legacy SDK. -->
+    <profile>
+      <id>legacy-sql-sdk</id>
+      <properties><odps.core.version>0.51.2-public</odps.core.version></properties>
+      <build><plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version>
+          <configuration><testIncludes><testInclude>**/SQLResultTest.java</testInclude></testIncludes></configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId>
+          <configuration><includes><include>**/SQLResultTest.java</include></includes></configuration>
+        </plugin>
+      </plugins></build>
+    </profile>
+  </profiles>
 </project>
