@@ -180,8 +180,13 @@ unverified rather than assumed:
 - a BSD or macOS native build: the emulator numbers above were read from a Linux/amd64 binary (image or
   local build). Apple Silicon runs that same Linux image under emulation, which is a different check and
   was not performed for these rows;
-- other merge refusal shapes (malformed merge body, oversized part, quota refusal) — only the two rows
-  above were compared, so a third difference is not contradicted by this table, it is simply unmeasured.
+- other merge refusal shapes (malformed merge body, oversized part, quota refusal) were never compared,
+  so a further difference is not contradicted by this table - it is simply unmeasured. One exception is
+  known and runs the other way: the service ignores a declared `x-odps-resource-merge-total-bytes` that
+  disagrees with the assembled payload (re-measured 2026-10-08: 304 bytes merged under a 4400-byte
+  declaration, accepted, published byte-exact) while this emulator refuses it. That third difference is
+  documented in [the protocol notes](docs/protocol.md) instead of here, because it is the emulator being
+  stricter than the service, not a cloud behavior the emulator lacks.
 
 To re-measure the emulator column without a project: `go test ./internal/server -run
 TestResourceRESTContract` pins the codes and the part/target state of row 1, and
