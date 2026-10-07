@@ -148,12 +148,23 @@ before any part is read leaves the parts addressable and does not touch the exis
 naming a part that was never uploaded is `404 NoSuchObject` on both sides. Only the *shape* of the
 refusal differs.
 
+Three more things the *same* request hits, measured against a live project and against `main` on
+2026-10-08 (all three are refusal-mechanics differences, so they belong to this row rather than to a new one):
+
+| Same `?rOpMerge` request | Live service | Emulator |
+| --- | --- | --- |
+| without `x-odps-resource-merge-total-bytes` | `400 InvalidParameter` — `ODPS-0420051: Missing header in HTTP request - x-odps-resource-merge-total-bytes`; the header is **required** | the header is optional: the merge is attempted and refused for the target instead (`400 ResourceAlreadyExists`) |
+| a wrong declared total **and** an existing target | `409 ObjectAlreadyExists` — the target check runs first and the declared total is never compared | `400 InvalidParameter` on the declared total — this emulator's own check runs first |
+| the part a refusal-before-reading leaves behind | addressable by name (`?meta` 200, delete works) but **absent from listing**, including an exact-name prefix query | addressable by name **and listed** |
+
 **Who sees it, and what to do:** tests or retry policies that branch on the HTTP status or on the client
 exception class. In the cloud the two refusals arrive as a server error (`InternalServerError`, retryable)
 and a conflict (`ObjectAlreadyExists`); locally both arrive as one `400`, so an emulator-backed test of
 "500 retries, 400 does not" is testing this server's taxonomy instead of the service's. Assert that the
 merge was refused and assert the part/target state — `go test ./internal/server -run
-TestResourceRESTContract` pins exactly those. Keep numeric status assertions out of emulator-backed tests,
+TestResourceRESTContract` pins exactly those - **by name** (`Resource.exists()` / `?meta`), never by
+listing: a cleanup assertion built on `list_resources(prefix=...)` reads clean against the cloud while
+the part still exists, and reads leaked against the emulator when nothing leaked. Keep numeric status assertions out of emulator-backed tests,
 or pin them per target and say so in a comment.
 
 ### 2. A `TABLE` resource may point at a table that does not exist
@@ -185,6 +196,8 @@ unverified rather than assumed:
   local build). Apple Silicon runs that same Linux image under emulation, which is a different check and
   was not performed for these rows;
 - other merge refusal shapes (malformed merge body, oversized part, quota refusal) were never compared,
+  and the three header/ordering cells above were measured only on the duplicate-target path and the
+  missing/wrong declared-total combinations this probe tried - another combination is unmeasured,
   so a further difference is not contradicted by this table - it is simply unmeasured. One exception is
   known and runs the other way: the service ignores a declared `x-odps-resource-merge-total-bytes` that
   disagrees with the assembled payload (re-measured 2026-10-08: 304 bytes merged under a 4400-byte
