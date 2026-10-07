@@ -102,7 +102,63 @@ v1 Testcontainers 的模式保留，但就绪条件改为 HTTP `/readyz`，无�
 
 资源 payload 上限 64 MiB/个、512 MiB/project+schema；资源名与函数名按大小写不敏感解析，回读保留上传时的大小写。
 
-DATETIME/TIMESTAMP 常量、STRING cast、ARRAY 构造与 NAMED_STRUCT 有显式映射；这不是通用 ODPS SQL 兼容实现。支持子集以测试为准，未实现操作返回带 request-id 的错误。引擎关闭外部文件/网络访问，内部数据库命名空间与函数不可从 SQL 访问。
+DATETIME/TIMESTAMP 常量、STRING cast、ARRAY 构造与 NAMED_STRUCT 有显式映射；这不是通用 ODPS SQL 兼容实现。支持子集以测试为准，未实现操作返回带 request-id 的错误。与真实服务端有两格已实测的差异（分片合并被拒时的状态码/错误码、`TABLE` 资源可指向不存在的表），见[与真实服务端的已知差异](#与真实服务端的已知差异)。引擎关闭外部文件/网络访问，内部数据库命名空间与函数不可从 SQL 访问。
+
+## 与真实服务端的已知差异
+
+下面两格差异是**真机实测**出来的，不是推断，也刻意保持现状：这些状态码与错误码正是本仓库测试已经在断言的行为，
+改动它们是契约决策，不是文档修订。决策落地之前，本节就是跟踪清单——若你的实测与某一行的读数冲突，
+请带两侧读数和 request id 开 issue。
+
+### 1. 被拒绝的分片合并，状态码与错误码不同
+
+分片上传的最后一步是 `?rOpMerge=true`。Java SDK 走这条路有两种情形：内容超出 64 MiB 分块缓冲，或者流的长度无法判定
+（管道、网络流）——后者不论大小都分片；PyODPS 则在超过 `options.resource_chunk_size` 时分片。实测比对了其中的两种拒绝：
+
+| 合并被拒的原因 | 真实服务端 | 模拟器 |
+| --- | --- | --- |
+| 合并请求体里的 MD5 与实际拼出的内容不符 | `500 InternalServerError` — `ODPS-0421213: Save resource error - Merge part temp files failed! Message: The merged file's signature does not match!` | `400 InvalidParameter` — `merged payload does not match MD5 <md5>` |
+| 目标资源名已存在 | `409 ObjectAlreadyExists` — `ODPS-0421121: The resource has already existed - <name>` | `400 ResourceAlreadyExists` |
+
+两种拒绝的**其余部分两侧一致**，可依赖的是这些：合并已经把分片拼起来之后失败，会一并消费清单里的分片，重试必须重传；
+在读到任何分片之前就定案的拒绝保留分片、不动已存在的目标；清单点名一个从未上传过的分片，两侧都是 `404 NoSuchObject`。
+只有拒绝的**形态**不同。
+
+**谁会观察到，怎么绕：**按 HTTP 状态码或客户端异常类型分支的测试与重试策略。真机上这两种拒绝分别落成服务端错误
+（`InternalServerError`，通常按可重试处理）与冲突（`ObjectAlreadyExists`）；模拟器把两者都压成一个 `400`。
+所以一条"500 重试、400 不重试"的本地用例验的是本模拟器的分类，不是服务端的分类。断言"合并被拒绝"以及分片与目标的状态即可——
+`go test ./internal/server -run TestResourceRESTContract` 钉住的正是这两格；要断言具体状态码就按目标分别钉，并在注释里写明。
+
+### 2. `TABLE` 资源可以指向一张不存在的表
+
+| 场景 | 真实服务端 | 模拟器 |
+| --- | --- | --- |
+| 创建 `TABLE` 资源，其源表从未被创建 | `404 NoSuchObject` — `ODPS-0422111: Table not found - <project>.<table>`；资源不会建立 | `201 Created`；资源可被列举，`?meta` 能回读 `TableName` |
+
+**谁会观察到，怎么绕：**用 table 资源（或依赖它的函数）做 fixture、而表名写错或表还没建的用例。本地通过、线上失败，
+而且线上是在**创建**那一步就失败，不是等到首次使用；只在模拟器上跑过的套件会对一个服务端根本不接受的引用报绿。
+模拟器要求 `x-odps-copy-table-source` 非空，也会校验函数引用的**资源**是否存在，`TABLE` 资源背后的表是唯一不解析的指针。
+在 seed 里建表，或在 fixture 前置断言 `odps.exist_table(...)` / `odps.tables().exists(...)`，让坏引用在本地按同一个理由失败。
+
+### 这些读数没覆盖什么
+
+两格都取自**单个真实项目**，只从客户端可见层读取（PyODPS 异常对象的 `status_code`、`code` 与消息文本），
+endpoint 形态是 `http://`，运行环境 Linux/amd64，时间 2026-10-02 至 2026-10-05；模拟器一列在主干 `24f3fce` 上复测。
+以下按未验证陈述，不当作结论：
+
+- 其他 region、其他服务端版本，或走带信任链的公网 HTTPS 时是否给出同样的码——这几轮没有经过 TLS 终结或网关，
+  网关额外产生的错误形态一概未知；
+- BSD 或 macOS 原生构建：上表的模拟器读数来自 Linux/amd64 二进制（镜像或本机构建）。Apple Silicon 以模拟方式运行同一个
+  Linux 镜像，那是另一件事，这几轮没有做；
+- 其他合并拒绝形态（请求体格式不合法、分片超限、配额拒绝）只比对过上面两格；本表不否认第三种差异存在，它只是未测。
+
+不带项目也能复测模拟器一侧：`go test ./internal/server -run TestResourceRESTContract` 钉住第 1 格的状态码与分片/目标去向；`python tests/python/run.py http://127.0.0.1:8080`（dummy 凭据、合成数据，已挂进 CI）用 PyODPS 客户端断言同样两种合并拒绝——它钉的是分片去向，刻意不钉服务端的状态数字。第 2 格本仓库没有用例：Go 用例只在**已存在**的表上注册 `TABLE` 资源，所以“表不存在仍接受创建”这条是按实测记录，不是按用例记录。
+
+服务端一侧需要你自己的项目：上传一个分片（`project.resources.create(name=..., type="file", temp=True, part=True, fileobj=...)`）、用与实际内容不符的 MD5 调 `project.resources.merge_part_files(...)`、再对一个已存在的名字重放同一次合并，最后 `odps.create_resource(name, "table", table_name="<从未创建的表>")`，把客户端抛出的 `status_code`、`code` 与消息打印出来。同样的三个读数被两轮独立复现，第 1、2 格才能从“测过一次”升级成“钉住了”。服务端一列需要你自己的项目：
+上传一个分片（`project.resources.create(name=..., type="file", temp=True, part=True, fileobj=...)`），
+用与实际内容不符的 MD5 调 `project.resources.merge_part_files(...)`，再对一个已存在的名字重放同一次合并，
+最后 `odps.create_resource(name, "table", table_name="<从未创建的表>")`——把客户端抛出的 `status_code`、`code`
+与消息打印出来比对。
 
 ## 构建与验证
 

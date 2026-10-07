@@ -108,9 +108,90 @@ Unsupported: Storage v1, Volume/Blob, CDC/incremental reads, filter predicate pu
 
 Resource payloads are capped at 64 MiB each and 512 MiB per project/schema. Resource and function names resolve case-insensitively while the uploaded spelling is what listings return. Unsupported operations return errors rather than cloud behavior being assumed.
 
+Two measured differences from the service - the codes a refused chunked merge returns, and a `TABLE` resource accepted for a table that does not exist - are listed in [Known divergences from the real service](#known-divergences-from-the-real-service).
+
 Flink 1.16.2 standalone bounded uploads were tested with Protobuf/Arrow and ordinary/dynamic-partition tables. Use `sink.standalone.enable=true`. A coordinator-mode bounded input in the tested connector can finish without committing rows; that mode is not certified. Checkpoint recovery and cross-job exactly-once have not been validated.
 
 ClickHouse-facing Tunnel behavior is covered by protocol and Java SDK tests. A complete ClickHouse engine integration run is not claimed.
+
+## Known divergences from the real service
+
+Two differences against a live MaxCompute project were **measured on the wire**, not inferred, and they
+stay as they are on purpose: the codes below are what this repository's own tests assert on, so changing
+one is a contract decision, not a documentation fix. Until that decision is taken, this section is the
+tracking list — if your measurement contradicts a row, open an issue with both readings and a request id.
+
+### 1. A refused merge comes back with different status and error codes
+
+Chunked resource uploads finish with a `?rOpMerge=true` request. The Java SDK takes that path for
+anything overflowing its 64 MiB chunk buffer - and, whatever the size, for a stream whose length it
+cannot determine (a pipe or a network stream); PyODPS takes it above `options.resource_chunk_size`.
+Two refusal shapes were compared:
+
+| The merge is refused because | Live service | Emulator |
+| --- | --- | --- |
+| the assembled payload does not match the MD5 in the merge body | `500 InternalServerError` — `ODPS-0421213: Save resource error - Merge part temp files failed! Message: The merged file's signature does not match!` | `400 InvalidParameter` — `merged payload does not match MD5 <md5>` |
+| the target resource name already exists | `409 ObjectAlreadyExists` — `ODPS-0421121: The resource has already existed - <name>` | `400 ResourceAlreadyExists` |
+
+Everything else about those refusals agrees, and that is the part worth depending on: a merge that fails
+after assembling the payload consumes the parts it listed, so a retry re-uploads them; a refusal settled
+before any part is read leaves the parts addressable and does not touch the existing target; a manifest
+naming a part that was never uploaded is `404 NoSuchObject` on both sides. Only the *shape* of the
+refusal differs.
+
+**Who sees it, and what to do:** tests or retry policies that branch on the HTTP status or on the client
+exception class. In the cloud the two refusals arrive as a server error (`InternalServerError`, retryable)
+and a conflict (`ObjectAlreadyExists`); locally both arrive as one `400`, so an emulator-backed test of
+"500 retries, 400 does not" is testing this server's taxonomy instead of the service's. Assert that the
+merge was refused and assert the part/target state — `go test ./internal/server -run
+TestResourceRESTContract` pins exactly those. Keep numeric status assertions out of emulator-backed tests,
+or pin them per target and say so in a comment.
+
+### 2. A `TABLE` resource may point at a table that does not exist
+
+| Case | Live service | Emulator |
+| --- | --- | --- |
+| create a `TABLE` resource whose source table was never created | `404 NoSuchObject` — `ODPS-0422111: Table not found - <project>.<table>`; the resource is not created | `201 Created`; the resource is listed and `?meta` returns its `TableName` |
+
+**Who sees it, and what to do:** any fixture that registers a table-backed resource, or a function that
+depends on one, with a typo'd or not-yet-created table name. It passes locally and fails in the cloud —
+and there it fails on the *create* call, not at first use, so a suite that only ever ran against the
+emulator reports a green setup for a reference the service never accepts. The emulator requires a
+non-empty `x-odps-copy-table-source` and does validate the *resources* a function references; the table
+behind a `TABLE` resource is the one pointer it does not resolve. Create the table in the seed, or assert
+`odps.exist_table(...)` / `odps.tables().exists(...)` in the fixture setup, so a broken reference fails
+locally for the reason it would fail remotely.
+
+### What these readings do not cover
+
+Both rows come from **one live project**, read from the client-visible layer only (PyODPS exception
+`status_code`, `code`, message text), against an `http://` service endpoint, on Linux/amd64, between
+2026-10-02 and 2026-10-05; the emulator column was re-measured against `main` at `24f3fce`. Stated as
+unverified rather than assumed:
+
+- the same cells in another region, on another service version, or behind public HTTPS with a real
+  certificate chain — no run here went through TLS termination or a gateway, so gateway-added error
+  shapes are unknown;
+- a BSD or macOS native build: the emulator numbers above were read from a Linux/amd64 binary (image or
+  local build). Apple Silicon runs that same Linux image under emulation, which is a different check and
+  was not performed for these rows;
+- other merge refusal shapes (malformed merge body, oversized part, quota refusal) — only the two rows
+  above were compared, so a third difference is not contradicted by this table, it is simply unmeasured.
+
+To re-measure the emulator column without a project: `go test ./internal/server -run
+TestResourceRESTContract` pins the codes and the part/target state of row 1, and
+`python tests/python/run.py http://127.0.0.1:8080` (dummy credentials, synthetic fixtures, wired into
+CI) asserts the same two merge refusals through the PyODPS client - the part lifecycle, deliberately
+not the service's status numbers. Row 2 has no case in this repository: the Go test registers a
+`TABLE` resource against a table that exists, so "created even when the table is missing" is
+recorded here from measurement, not from a test.
+
+The service column needs a project of your own: upload a part
+(`project.resources.create(name=..., type="file", temp=True, part=True, fileobj=...)`), call
+`project.resources.merge_part_files(...)` with an MD5 that does not match the assembled bytes, repeat
+the merge against an existing name, then `odps.create_resource(name, "table", table_name="<never created>")`
+and print `status_code`, `code` and the message of whatever the client raises. Two runs agreeing on the
+same three numbers is what would move rows 1 and 2 from "measured once" to "pinned".
 
 ## Fixtures, persistence and limits
 
