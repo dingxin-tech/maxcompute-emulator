@@ -121,6 +121,11 @@ stay as they are on purpose: the codes below are what this repository's own test
 one is a contract decision, not a documentation fix. Until that decision is taken, this section is the
 tracking list — if your measurement contradicts a row, open an issue with both readings and a request id.
 
+Both rows describe `main`. The released `1.1.0` image has no resource plane yet: running the PyODPS
+contract probe against a `1.1.0` build on 2026-09-21 ended at `1 passed, 29 failed`, those calls answered
+as not found (the case count grows with the probe; the missing-capability answer is what stayed). So on
+that tag there is nothing to diverge from - use resources only from a source build or a tag after `1.1.0`.
+
 ### 1. A refused merge comes back with different status and error codes
 
 Chunked resource uploads finish with a `?rOpMerge=true` request. The Java SDK takes that path for
