@@ -110,7 +110,7 @@ DATETIME/TIMESTAMP 常量、STRING cast、ARRAY 构造与 NAMED_STRUCT 有显式
 改动它们是契约决策，不是文档修订。决策落地之前，本节就是跟踪清单——若你的实测与某一行的读数冲突，
 请带两侧读数和 request id 开 issue。
 
-两格说的都是 `main`。已发布的 `1.1.0` 镜像还没有资源面：2026-09-21 把 PyODPS 契约探针打在 `1.1.0` 的构建上，收尾是 `1 passed, 29 failed`，这些调用直接按找不到（not found）应答（用例数会随探针增长，保持不变的是"能力缺失"这个答复）。也就是说 `1.1.0` 上根本没有这两格可比的对象——要用资源面请从源码构建，或等 `1.1.0` 之后的 tag。
+两格说的都是 `main`，已发布的镜像不在这两格里。2026-10-08 直接对 `maxcompute/maxcompute-emulator:1.1.0`（digest `sha256:57d1d25757255a1f16d0a3c34ef8b99c24bf8615e1c14c13dfd5a41026dee2d3`）复核：`GET /projects/<project>/resources` 回 `404` + `UnsupportedOperation: unsupported endpoint`，`/capabilities` 既未声明 `resources` 也未声明 `functions`；当前 PyODPS 契约探针打在该镜像上收尾是 `1 passed, 32 failed`，唯一通过的那格也是因为整个端点被拒才通过。这与 2026-09-21 打在 `1.1.0` 源码构建上的 `1 passed, 29 failed` 同形——用例数随探针增长，"能力不存在"这个答复没变。也就是说 `1.1.0` 上根本没有这两格可比的对象：要用资源面请从源码构建，或等 `1.1.0` 之后的 tag。
 
 ### 1. 被拒绝的分片合并，状态码与错误码不同
 

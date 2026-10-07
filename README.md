@@ -121,10 +121,14 @@ stay as they are on purpose: the codes below are what this repository's own test
 one is a contract decision, not a documentation fix. Until that decision is taken, this section is the
 tracking list — if your measurement contradicts a row, open an issue with both readings and a request id.
 
-Both rows describe `main`. The released `1.1.0` image has no resource plane yet: running the PyODPS
-contract probe against a `1.1.0` build on 2026-09-21 ended at `1 passed, 29 failed`, those calls answered
-as not found (the case count grows with the probe; the missing-capability answer is what stayed). So on
-that tag there is nothing to diverge from - use resources only from a source build or a tag after `1.1.0`.
+Both rows describe `main`; the released image is outside both of them. Checked directly against
+`maxcompute/maxcompute-emulator:1.1.0` (digest `sha256:57d1d25757255a1f16d0a3c34ef8b99c24bf8615e1c14c13dfd5a41026dee2d3`,
+2026-10-08): `GET /projects/<project>/resources` answers `404` with `UnsupportedOperation: unsupported
+endpoint`, and `/capabilities` declares neither `resources` nor `functions`. The PyODPS contract probe
+against that image ends at `1 passed, 32 failed` - and the single case that passes there passes because
+the whole endpoint is refused. Same shape as the 2026-09-21 run against a `1.1.0` source build
+(`1 passed, 29 failed`): the case count grows with the probe, the missing-capability answer does not.
+So there is nothing to diverge from on `1.1.0` - use resources only from a source build or a tag after it.
 
 ### 1. A refused merge comes back with different status and error codes
 
