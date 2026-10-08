@@ -185,9 +185,13 @@ locally for the reason it would fail remotely.
 ### What these readings do not cover
 
 Both rows come from **one live project**, read from the client-visible layer only (PyODPS exception
-`status_code`, `code`, message text), against an `http://` service endpoint, on Linux/amd64, between
-2026-10-02 and 2026-10-05; the emulator column was re-measured against `main` at `24f3fce`. Stated as
-unverified rather than assumed:
+`status_code`, `code`, message text), against an `http://` service endpoint, on Linux/amd64.
+**Round 1**: 2026-10-02 and 2026-10-03, with the emulator column measured against `main` at `24f3fce`
+on 2026-10-05. **Round 2**: both rows re-measured on 2026-10-08 and neither was overturned - row 1's
+`409` + `ODPS-0421121` reproduced once the merge request carried the header the service requires (an
+attempt that omitted it answered `400 InvalidParameter`, which is a different failure, not a changed
+answer), and row 2's `404` + `ODPS-0422111` reproduced for a table that `exist_table` confirms missing.
+Stated as unverified rather than assumed:
 
 - the same cells in another region, on another service version, or behind public HTTPS with a real
   certificate chain — no run here went through TLS termination or a gateway, so gateway-added error
