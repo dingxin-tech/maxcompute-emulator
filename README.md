@@ -135,7 +135,7 @@ So there is nothing to diverge from on `1.1.0` - use resources only from a sourc
 Chunked resource uploads finish with a `?rOpMerge=true` request. The Java SDK takes that path for
 anything overflowing its 64 MiB chunk buffer - and, whatever the size, for a stream whose length it
 cannot determine (a pipe or a network stream); PyODPS takes it above `options.resource_chunk_size`.
-Two refusal shapes were compared:
+The two refusal shapes compared head to head:
 
 | The merge is refused because | Live service | Emulator |
 | --- | --- | --- |
@@ -145,8 +145,9 @@ Two refusal shapes were compared:
 Everything else about those refusals agrees, and that is the part worth depending on: a merge that fails
 after assembling the payload consumes the parts it listed, so a retry re-uploads them; a refusal settled
 before any part is read leaves the parts addressable and does not touch the existing target; a manifest
-naming a part that was never uploaded is `404 NoSuchObject` on both sides. Only the *shape* of the
-refusal differs.
+naming a part that was never uploaded is `404 NoSuchObject` on both sides. What differs is the shape of
+the refusal - and, per the third row below, whether the part a refusal leaves behind is visible in a
+listing at all.
 
 Three more things the *same* request hits, measured against a live project and against `main` on
 2026-10-08 (all three are refusal-mechanics differences, so they belong to this row rather than to a new one):
@@ -194,20 +195,19 @@ answer), and row 2's `404` + `ODPS-0422111` reproduced for a table that `exist_t
 Stated as unverified rather than assumed:
 
 - the same cells in another region, on another service version, or behind public HTTPS with a real
-  certificate chain — no run here went through TLS termination or a gateway, so gateway-added error
+  certificate chain - no run here went through TLS termination or a gateway, so gateway-added error
   shapes are unknown;
 - a BSD or macOS native build: the emulator numbers above were read from a Linux/amd64 binary (image or
   local build). Apple Silicon runs that same Linux image under emulation, which is a different check and
   was not performed for these rows;
 - other merge refusal shapes (malformed merge body, oversized part, quota refusal) were never compared,
-  and the three header/ordering cells above were measured only on the duplicate-target path and the
-  missing/wrong declared-total combinations this probe tried - another combination is unmeasured,
-  so a further difference is not contradicted by this table - it is simply unmeasured. One exception is
-  known and runs the other way: the service ignores a declared `x-odps-resource-merge-total-bytes` that
-  disagrees with the assembled payload (re-measured 2026-10-08: 304 bytes merged under a 4400-byte
-  declaration, accepted, published byte-exact) while this emulator refuses it. That third difference is
-  documented in [the protocol notes](docs/protocol.md) instead of here, because it is the emulator being
-  stricter than the service, not a cloud behavior the emulator lacks.
+  and the three header/ordering cells above cover only the duplicate-target path with the declared-total
+  values this probe tried. Another combination is simply unmeasured - this table does not deny that a
+  third difference exists. One is known and runs the other way: the service ignores a declared
+  `x-odps-resource-merge-total-bytes` that disagrees with the assembled payload (re-measured 2026-10-08:
+  304 bytes merged under a 4400-byte declaration, accepted, published byte-exact) while this emulator
+  refuses it. That difference is documented in [the protocol notes](docs/protocol.md) rather than here,
+  because it is the emulator being stricter than the service, not a cloud behavior the emulator lacks.
 
 To re-measure the emulator column without a project: `go test ./internal/server -run
 TestResourceRESTContract` pins the codes and the part/target state of row 1, and
@@ -221,8 +221,12 @@ The service column needs a project of your own: upload a part
 (`project.resources.create(name=..., type="file", temp=True, part=True, fileobj=...)`), call
 `project.resources.merge_part_files(...)` with an MD5 that does not match the assembled bytes, repeat
 the merge against an existing name, then `odps.create_resource(name, "table", table_name="<never created>")`
-and print `status_code`, `code` and the message of whatever the client raises. Two runs agreeing on the
-same three numbers is what would move rows 1 and 2 from "measured once" to "pinned".
+and print `status_code`, `code` and the message of whatever the client raises. Use the client's own merge
+helper or set `x-odps-resource-merge-total-bytes` yourself: a hand-built `?rOpMerge` request without that
+header is answered `400 InvalidParameter` (`ODPS-0420051: Missing header in HTTP request`) before the
+target is looked at - a different failure from the ones in the tables above. Independent rounds agreeing on
+the same numbers are what moved rows 1 and 2 from "measured once" to "pinned": row 1 has 2026-10-02, 10-03
+and 10-08; row 2 has 2026-10-02 and 2026-10-08.
 
 ## Fixtures, persistence and limits
 

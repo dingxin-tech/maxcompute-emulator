@@ -115,7 +115,7 @@ DATETIME/TIMESTAMP 常量、STRING cast、ARRAY 构造与 NAMED_STRUCT 有显式
 ### 1. 被拒绝的分片合并，状态码与错误码不同
 
 分片上传的最后一步是 `?rOpMerge=true`。Java SDK 走这条路有两种情形：内容超出 64 MiB 分块缓冲，或者流的长度无法判定
-（管道、网络流）——后者不论大小都分片；PyODPS 则在超过 `options.resource_chunk_size` 时分片。实测比对了其中的两种拒绝：
+（管道、网络流）——后者不论大小都分片；PyODPS 则在超过 `options.resource_chunk_size` 时分片。先正面对比两种拒绝：
 
 | 合并被拒的原因 | 真实服务端 | 模拟器 |
 | --- | --- | --- |
@@ -124,7 +124,7 @@ DATETIME/TIMESTAMP 常量、STRING cast、ARRAY 构造与 NAMED_STRUCT 有显式
 
 两种拒绝的**其余部分两侧一致**，可依赖的是这些：合并已经把分片拼起来之后失败，会一并消费清单里的分片，重试必须重传；
 在读到任何分片之前就定案的拒绝保留分片、不动已存在的目标；清单点名一个从未上传过的分片，两侧都是 `404 NoSuchObject`。
-只有拒绝的**形态**不同。
+差别在拒绝的**形态**上；而下面那张表还显示，被拒后留下的分片能否被列举看到，两侧也不同。
 
 同一次 `?rOpMerge` 请求还会碰到三处差异，都是 2026-10-08 对真实项目与 `main` 实测的，属于这一格的机制差异，不单开新格：
 
@@ -156,26 +156,30 @@ DATETIME/TIMESTAMP 常量、STRING cast、ARRAY 构造与 NAMED_STRUCT 有显式
 endpoint 形态是 `http://`，运行环境 Linux/amd64。**第一轮**：2026-10-02 与 10-03，模拟器一列于 10-05 在主干
 `24f3fce` 复测。**第二轮**：2026-10-08 两格各自复测，都没被推翻——第 1 格的 `409` + `ODPS-0421121` 在合并请求带上
 服务端必需的申报头后复现（漏带该头的那次回的是 `400 InvalidParameter`，那是另一种失败，不是答案变了）；
-第 2 格的 `404` + `ODPS-0422111` 对一个 `exist_table` 确认不存在的表复现。以下仍按未验证陈述：
-以下按未验证陈述，不当作结论：
+第 2 格的 `404` + `ODPS-0422111` 对一个 `exist_table` 确认不存在的表复现。以下按未验证陈述，不当作结论：
 
 - 其他 region、其他服务端版本，或走带信任链的公网 HTTPS 时是否给出同样的码——这几轮没有经过 TLS 终结或网关，
   网关额外产生的错误形态一概未知；
-- BSD 或 macOS 原生构建：上表的模拟器读数来自 Linux/amd64 二进制（镜像或本机构建）。Apple Silicon 以模拟方式运行同一个
-  Linux 镜像，那是另一件事，这几轮没有做；
-- 其他合并拒绝形态（请求体格式不合法、分片超限、配额拒绝）从未比对过；上面表里的请求头与检查顺序三格，也只覆盖到"目标已存在"这一条路径与本轮试过的申报值组合，别的组合未测，所以本表不否认第三种差异存在。
-  有一个例外是已知的，而且方向相反：申报的 `x-odps-resource-merge-total-bytes` 与实际拼装长度不符时，
-  服务端不看这个申报值（2026-10-08 复测：304 字节的合并按 4400 申报，被接受，发布内容逐字节正确），
-  本模拟器会拒绝。这第三种差异写在[协议与实现边界](docs/protocol.md)里而不是本节，因为它是模拟器比服务端更严，
-  不是模拟器缺少的服务端行为。
+- BSD 或 macOS 原生构建：上表的模拟器读数来自 Linux/amd64 二进制（镜像或本机构建）。Apple Silicon 以模拟方式运行
+  同一个 Linux 镜像，那是另一件事，这几轮没有做；
+- 其他合并拒绝形态（请求体格式不合法、分片超限、配额拒绝）从未比对过；上面表里的请求头与检查顺序三格，也只覆盖到
+  "目标已存在"这一条路径与本轮试过的申报值组合，别的组合就是未测——本表不否认还存在第三种差异。有一个已知例外，
+  而且方向相反：申报的 `x-odps-resource-merge-total-bytes` 与实际拼装长度不符时，服务端不看这个申报值
+  （2026-10-08 复测：304 字节的合并按 4400 申报，被接受，发布内容逐字节正确），本模拟器会拒绝。这第三种差异写在
+  [协议与实现边界](docs/protocol.md)里而不是本节，因为它是模拟器比服务端更严，不是模拟器缺少的服务端行为。
 
-不带项目也能复测模拟器一侧：`go test ./internal/server -run TestResourceRESTContract` 钉住第 1 格的状态码与分片/目标去向；`python tests/python/run.py http://127.0.0.1:8080`（dummy 凭据、合成数据，已挂进 CI）用 PyODPS 客户端断言同样两种合并拒绝——它钉的是分片去向，刻意不钉服务端的状态数字。第 2 格本仓库没有用例：Go 用例只在**已存在**的表上注册 `TABLE` 资源，所以“表不存在仍接受创建”这条是按实测记录，不是按用例记录。
+不带项目也能复测模拟器一侧：`go test ./internal/server -run TestResourceRESTContract` 钉住第 1 格的状态码与分片/目标去向；
+`python tests/python/run.py http://127.0.0.1:8080`（dummy 凭据、合成数据，已挂进 CI）用 PyODPS 客户端断言同样两种合并拒绝——
+它钉的是分片去向，刻意不钉服务端的状态数字。第 2 格本仓库没有用例：Go 用例只在**已存在**的表上注册 `TABLE` 资源，
+所以"表不存在仍接受创建"这条是按实测记录，不是按用例记录。
 
-服务端一侧需要你自己的项目：上传一个分片（`project.resources.create(name=..., type="file", temp=True, part=True, fileobj=...)`）、用与实际内容不符的 MD5 调 `project.resources.merge_part_files(...)`、再对一个已存在的名字重放同一次合并，最后 `odps.create_resource(name, "table", table_name="<从未创建的表>")`，把客户端抛出的 `status_code`、`code` 与消息打印出来。同样的三个读数被两轮独立复现，第 1、2 格才能从“测过一次”升级成“钉住了”。服务端一列需要你自己的项目：
-上传一个分片（`project.resources.create(name=..., type="file", temp=True, part=True, fileobj=...)`），
-用与实际内容不符的 MD5 调 `project.resources.merge_part_files(...)`，再对一个已存在的名字重放同一次合并，
-最后 `odps.create_resource(name, "table", table_name="<从未创建的表>")`——把客户端抛出的 `status_code`、`code`
-与消息打印出来比对。
+服务端一侧需要你自己的项目：上传一个分片
+（`project.resources.create(name=..., type="file", temp=True, part=True, fileobj=...)`），用与实际内容不符的 MD5 调
+`project.resources.merge_part_files(...)`，再对一个已存在的名字重放同一次合并，最后
+`odps.create_resource(name, "table", table_name="<从未创建的表>")`，把客户端抛出的 `status_code`、`code` 与消息打印出来。
+请用客户端自带的合并辅助函数，或自己补上 `x-odps-resource-merge-total-bytes`：手工构造的 `?rOpMerge` 缺这个头会在查目标之前
+先被 `400 InvalidParameter`（`ODPS-0420051: Missing header in HTTP request`）挡掉，那是另一种失败，不是上面表里的答案。
+同一组读数被多轮独立复现才算"钉住"：第 1 格有 2026-10-02、10-03、10-08 三轮，第 2 格有 2026-10-02、10-08 两轮。
 
 ## 构建与验证
 
