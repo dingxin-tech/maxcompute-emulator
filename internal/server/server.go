@@ -195,6 +195,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 200, map[string]string{"status": "ready", "version": Version})
 		return
 	}
+	if strings.HasPrefix(path, "storage/v1/") {
+		s.storageV1(w, r)
+		return
+	}
 	if path == "storage/v2" || path == "storage/v3" {
 		s.storageAPI(w, r)
 		return

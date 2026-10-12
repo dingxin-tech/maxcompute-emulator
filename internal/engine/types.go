@@ -64,7 +64,7 @@ func ParseType(s string) (Type, error) {
 					if !ok {
 						return t, fmt.Errorf("invalid STRUCT")
 					}
-					t.Fields = append(t.Fields, a)
+					t.Fields = append(t.Fields, strings.Trim(a, "`"))
 					p = b
 				}
 				c, e := ParseType(p)
@@ -193,5 +193,5 @@ func (t Type) StorageArrow() arrow.DataType {
 func Quote(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 func NewColumn(name, typ string) (Column, error) {
 	t, e := ParseType(typ)
-	return Column{Name: strings.ToLower(name), Type: strings.ToLower(typ), Nullable: true, Parsed: t}, e
+	return Column{Name: strings.ToLower(name), Type: strings.ToLower(strings.ReplaceAll(typ, "`", "")), Nullable: true, Parsed: t}, e
 }

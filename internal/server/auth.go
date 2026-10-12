@@ -146,6 +146,9 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) bool {
 		grants := c.Read
 		storageRead := false
 		path := strings.TrimPrefix(r.URL.Path, "/api")
+		if strings.HasPrefix(path, "/storage/v1/") && strings.HasSuffix(path, "/sessions") && r.Method == "POST" && r.URL.Query().Get("session_type") == "batch_read" {
+			storageRead = true
+		}
 		if path == "/storage/v2" || path == "/storage/v3" {
 			switch r.URL.Query().Get("Action") {
 			case "TableCreateReadSession", "TableGetReadSession", "TableRead", "InstanceCreateReadSession", "InstanceGetReadSession", "InstanceRead":
