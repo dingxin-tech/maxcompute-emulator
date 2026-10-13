@@ -102,7 +102,7 @@ func arrowValue(a arrow.Array, i int, t engine.Type) (any, error) {
 	case *array.String:
 		return x.Value(i), nil
 	case *array.Binary:
-		if t.Name == "string" {
+		if t.Name == "string" || t.Name == "char" || t.Name == "varchar" {
 			return string(x.Value(i)), nil
 		}
 		return append([]byte(nil), x.Value(i)...), nil

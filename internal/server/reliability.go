@@ -97,6 +97,38 @@ func (s *Server) requestTrace(r *http.Request) *requestTrace {
 			}
 		}
 	}
+	// Write stages are explicit so tests can target one table and phase without
+	// corrupting metadata reads or downloads in the same SQL job.
+	writeResource := len(resource) >= 2 && resource[0] == "tables"
+	if writeResource && (q.Has("uploads") || q.Has("uploadid") || q.Has("upsertid") || (len(resource) == 3 && (resource[2] == "streams" || resource[2] == "upserts"))) {
+		t.Plane, t.Object = "tunnel", "upload"
+		if q.Has("upsertid") || (len(resource) == 3 && resource[2] == "upserts") {
+			t.Object = "upsert"
+		}
+		if len(resource) == 3 && resource[2] == "streams" {
+			t.Object = "stream"
+		}
+		switch r.Method {
+		case "GET":
+			t.Action = "reload"
+		case "PUT":
+			t.Action = "write"
+		case "DELETE":
+			t.Action = "abort"
+		case "POST":
+			t.Action = "commit"
+			if q.Get("uploadid") == "" && q.Get("upsertid") == "" {
+				t.Action = "create"
+			}
+		}
+	}
+	if path == "storage/v2" || path == "storage/v3" {
+		actions := map[string]string{"TableCreateWriteSession": "create_session", "TableCreateWriteStream": "create_stream", "TableWrite": "write", "TableCloseWriteStream": "close_stream", "TableCommitWriteSession": "commit"}
+		if action := actions[q.Get("Action")]; action != "" {
+			t.Plane, t.Object, t.Action, t.Format = "storage", "write", action, "arrow"
+		}
+	}
+
 	// Metadata-plane requests are addressed below the project node, with an
 	// optional schema segment: projects/P[/schemas/S]/resources[/NAME] and
 	// projects/P[/schemas/S]/registration/functions[/NAME]. The action is the
@@ -113,7 +145,7 @@ func (s *Server) requestTrace(r *http.Request) *requestTrace {
 		case len(sub) >= 2 && sub[0] == "registration" && sub[1] == "functions":
 			t.Plane, t.Object = "rest", "functions"
 		}
-		if t.Object != "" {
+		if t.Plane == "rest" && t.Object != "" {
 			switch r.Method {
 			case "GET", "HEAD":
 				t.Plane, t.Action = "rest", "read"
@@ -289,6 +321,31 @@ func validateFault(v *FaultRule) error {
 	if v.Effect.Rows < 0 || v.Effect.Rows > 100000 || v.Effect.Bytes < 0 || v.Effect.Bytes > 64<<20 || v.Effect.DelayMS < 0 || v.Effect.DelayMS > 60000 {
 		return fmt.Errorf("effect exceeds test limits")
 	}
+	writeFault := v.Match.Plane == "storage" && v.Match.Object == "write" ||
+		(v.Match.Plane == "tunnel" || v.Match.Plane == "") && (v.Match.Object == "upload" || v.Match.Object == "upsert" || v.Match.Object == "stream")
+	if writeFault {
+		actions := map[string]bool{"create": true, "reload": true, "write": true, "commit": true, "abort": true}
+		if v.Match.Plane == "storage" {
+			actions = map[string]bool{"create_session": true, "create_stream": true, "write": true, "close_stream": true, "commit": true}
+		}
+		if !actions[v.Match.Action] {
+			return fmt.Errorf("explicit write stage required")
+		}
+		if v.Match.Format != "" && v.Match.Format != "arrow" && v.Match.Format != "protobuf" {
+			return fmt.Errorf("invalid format")
+		}
+		switch v.Effect.Type {
+		case "http_error":
+			if v.Effect.Status < 400 || v.Effect.Status > 599 {
+				return fmt.Errorf("http_error requires status 400..599")
+			}
+		case "delay", "lost_ack":
+		default:
+			return fmt.Errorf("write faults support http_error, delay and lost_ack")
+		}
+		return nil
+	}
+
 	if v.Match.Plane == "rest" {
 		// The metadata plane has no streams, sessions, formats or quotas to
 		// corrupt, so only the two effects a client retry loop actually reacts
@@ -477,4 +534,20 @@ func faultRows(r *http.Request, res engine.Result) engine.Result {
 }
 func withTrace(r *http.Request, t *requestTrace) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), traceKey{}, t))
+}
+
+// A lost acknowledgement occurs only after the real mutation has completed.
+// Retried requests still use the ordinary protocol's idempotence rules.
+func afterWriteFault(w http.ResponseWriter, r *http.Request) bool {
+	t := trace(r)
+	if t == nil || t.fault == nil || t.fault.Type != "lost_ack" {
+		return false
+	}
+	conn, _, err := http.NewResponseController(w).Hijack()
+	if err != nil {
+		fail(w, r, 503, "ServiceUnavailable", fmt.Errorf("injected lost acknowledgement"))
+		return true
+	}
+	conn.Close()
+	return true
 }

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add Storage v1 batch read sessions, row-range/projection validation and Arrow/V5 negotiation; unsupported physical/incremental planning remains explicit.
+- Preserve all Arrow timestamp units, nested timestamps and IPC ZSTD/LZ4_FRAME compression.
+- Add Unicode CHAR/VARCHAR schema and transfer contracts, transactional table rename and atomic multi-partition additions.
+- Require table capability opt-in for partial PK updates and advertise explicit logical write bucket metadata.
+- Add test-only Tunnel/Storage write-stage HTTP errors, delays and lost acknowledgments, plus separate data-upload concurrency metrics.
+- Add independent protocol tests for mutation visibility, retry identity and commit idempotence, and document the companion Flink SQL stress/fault acceptance scope.
+
 - Answer the three endpoints the official JDBC driver calls before any statement runs: `POST /projects/p/authorization?sign_bearer_token` (placeholder logview token), `GET /logview/host`, and `GET /connection/mcqa` (refused by name, so a MaxQA misconfiguration stops resurfacing as an unrelated endpoint error).
 - Emit schema `columns`/`partitionKeys` as arrays instead of JSON `null`, which the Java SDK's `TunnelTableSchema` rejects — every DDL and INSERT result has no columns, so the download session the driver opens for one was unparseable.
 - Add `tests/jdbc`: acceptance against the published `odps-jdbc` artifact (offline mode), covering a statement with no result set end to end.

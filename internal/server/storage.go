@@ -29,6 +29,7 @@ type storageStream struct {
 	Requests        map[int64][32]byte
 }
 type storageSession struct {
+	TimestampUnit, DatetimeUnit                                 string
 	Overwrite                                                   bool
 	mu                                                          sync.Mutex
 	ID, Target, Project, Schema, Table, Mode, Status, SplitMode string
@@ -40,6 +41,7 @@ type storageSession struct {
 	Bytes                                                       int64
 }
 type storageRequest struct {
+	ArrowOptions                                                                            struct{ TimestampUnit, DatetimeUnit string }
 	PartitionSpec                                                                           string
 	Overwrite                                                                               bool
 	CommitMessages                                                                          []string
@@ -49,8 +51,9 @@ type storageRequest struct {
 	FilterPredicate                                                                         string
 	IncrementalRead                                                                         bool
 	SplitOptions                                                                            struct {
-		SplitMode   string
-		SplitNumber int64
+		SplitMode                  string
+		SplitNumber                int64
+		CrossPartition, BucketSort bool
 	}
 	StreamId                        string
 	StreamVersion                   int64
@@ -84,6 +87,9 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.checkProject(w, r, p) {
+		return
+	}
+	if !s.beforeProjectRequest(w, r) {
 		return
 	}
 	req := storageRequest{}
@@ -171,9 +177,20 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 				bad(400, "InvalidParameter", err)
 				return
 			}
+			for _, unit := range []string{req.ArrowOptions.TimestampUnit, req.ArrowOptions.DatetimeUnit} {
+				if unit != "" && unit != "second" && unit != "milli" && unit != "micro" && unit != "nano" {
+					bad(400, "InvalidParameter", fmt.Errorf("unsupported timestamp unit"))
+					return
+				}
+			}
+			v.TimestampUnit, v.DatetimeUnit = req.ArrowOptions.TimestampUnit, req.ArrowOptions.DatetimeUnit
 			v.Mode = "Read"
 			if req.SplitOptions.SplitMode != "" {
 				v.SplitMode = req.SplitOptions.SplitMode
+			}
+			if v.SplitMode == "Bucket" || (v.SplitMode == "Parallelism" && req.SplitOptions.SplitNumber != 1) || (strings.HasPrefix(r.URL.Path, "/api/storage/v1/") && req.SplitOptions.CrossPartition) || req.SplitOptions.BucketSort {
+				bad(400, "UnsupportedOperation", fmt.Errorf("requested split planning is not implemented"))
+				return
 			}
 			if v.SplitMode != "Size" && v.SplitMode != "RowOffset" && v.SplitMode != "Parallelism" && v.SplitMode != "Bucket" {
 				bad(400, "InvalidParameter", fmt.Errorf("unknown split mode"))
@@ -260,7 +277,7 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 		if n <= 0 || n > 65536 {
 			n = 4096
 		}
-		b, err := wire.Arrow(data, n, false)
+		b, err := wire.StorageArrow(data, n, r.Header.Get("Accept-Encoding"), v.TimestampUnit, v.DatetimeUnit)
 		if err != nil {
 			bad(400, "InvalidData", err)
 			return
@@ -271,6 +288,9 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 		streams := map[string]int64{}
 		for k, st := range v.Streams {
 			streams[k] = st.Version
+		}
+		if afterWriteFault(w, r) {
+			return
 		}
 		jsonResponse(w, 200, map[string]any{"SessionId": v.ID, "SessionStatus": v.Status, "Streams": streams, "MinUncommittedStagingId": "0"})
 	case "TableAbortWriteSession":
@@ -319,6 +339,9 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 			for _, st := range v.Streams {
 				st.Rows = nil
 			}
+		}
+		if afterWriteFault(w, r) {
+			return
 		}
 		jsonResponse(w, 200, map[string]any{})
 	case "TableCreateWriteStream", "TableGetWriteStream", "TableCloseWriteStream", "TableWrite":
@@ -430,7 +453,13 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 			if st.Exactly {
 				st.Requests[offset] = hash
 			}
+			if afterWriteFault(w, r) {
+				return
+			}
 			jsonResponse(w, 200, map[string]any{"ExactlyOnceRowOffset": st.Offset, "StagingId": strconv.FormatInt(st.Offset, 10)})
+			return
+		}
+		if afterWriteFault(w, r) {
 			return
 		}
 		jsonResponse(w, 200, map[string]any{"TableSchema": storageWriteSchema(v), "TableId": v.Meta.ID, "SchemaVersion": 1, "LatestSchemaVersion": 1, "RowOffset": st.Offset, "status": 0, "recordCount": st.Offset, "AccessToken": "emulator", "QuotaToken": "emulator"})
