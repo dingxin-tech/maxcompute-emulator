@@ -121,3 +121,41 @@ func TestStorageV1ReadColumnOrder(t *testing.T) {
 		t.Fatal(reader.Schema())
 	}
 }
+
+// Storage v2's public SDK enables CrossPartition by default. Its single logical
+// snapshot already combines the selected partitions; v1 physical cross-partition
+// planning remains unsupported and must not silently pass through the adapter.
+func TestStorageReadPlanningProtocolBoundary(t *testing.T) {
+	_, h := fixture(t, Config{})
+	body := `{"SplitOptions":{"SplitMode":"Size","SplitNumber":268435456,"CrossPartition":true}}`
+	for _, tc := range []struct {
+		path   string
+		status int
+	}{
+		{"/api/storage/v3?Action=TableCreateReadSession&Target=projects.p.schemas.default.tables.t", 200},
+		{"/api/storage/v1/projects/p/schemas/default/tables/t/sessions?session_type=batch_read", 400},
+	} {
+		resp, err := h.Client().Post(h.URL+tc.path, "application/json", bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != tc.status {
+			t.Fatalf("%s: got %d, want %d", tc.path, resp.StatusCode, tc.status)
+		}
+	}
+	for _, split := range []string{
+		`{"SplitMode":"Bucket"}`,
+		`{"SplitMode":"Parallelism","SplitNumber":4}`,
+		`{"SplitMode":"Size","BucketSort":true}`,
+	} {
+		resp, err := h.Client().Post(h.URL+"/api/storage/v3?Action=TableCreateReadSession&Target=projects.p.schemas.default.tables.t", "application/json", bytes.NewBufferString(`{"SplitOptions":`+split+`}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 400 {
+			t.Fatalf("unsupported split accepted: %s status %d", split, resp.StatusCode)
+		}
+	}
+}
