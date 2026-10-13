@@ -398,7 +398,33 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 				return none, err
 			}
 		}
-		q := "INSERT INTO " + Quote(name) + " SELECT *"
+		projection := "*"
+		boundedStrings := false
+		for _, c := range table.Columns {
+			if c.Parsed.Name == "char" || c.Parsed.Name == "varchar" {
+				boundedStrings = true
+			}
+		}
+		if boundedStrings {
+			stageRows, er := tx.QueryContext(ctx, "SELECT * FROM __emulator_stage LIMIT 0")
+			if er != nil {
+				return none, er
+			}
+			names, er := stageRows.Columns()
+			stageRows.Close()
+			if er != nil {
+				return none, er
+			}
+			if len(names) != len(table.Columns) {
+				return none, fmt.Errorf("column count mismatch")
+			}
+			expressions := []string{}
+			for i, c := range table.Columns {
+				expressions = append(expressions, c.Parsed.StringExpression(Quote(names[i])))
+			}
+			projection = strings.Join(expressions, ",")
+		}
+		q := "INSERT INTO " + Quote(name) + " SELECT " + projection
 		if len(extra) > 0 {
 			q += "," + strings.Join(extra, ",")
 		}

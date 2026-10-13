@@ -1,5 +1,24 @@
 # 构建
 
+## 从源码构建并验证候选版本
+
+Dockerfile 的 `build` 阶段包含源码与 CGO 依赖，可用同一阶段运行完整 Go 测试。
+用最终 `release` 阶段生成运行镜像，再让 Java SDK 对接候选镜像。以下以 ARM64
+为例，AMD64 环境可替换平台。开发候选版本的功能不能用旧的发布镜像替代验证。
+
+```sh
+docker build --platform linux/arm64 --target build -t maxcompute-emulator:test-build .
+docker run --rm --platform linux/arm64 maxcompute-emulator:test-build go test ./... -count=1
+docker build --platform linux/arm64 --target release -t maxcompute-emulator:candidate .
+docker image inspect maxcompute-emulator:candidate --format '{{.Id}}'
+git rev-parse HEAD
+mvn -B -f tests/java/pom.xml -Demulator.image=maxcompute-emulator:candidate test
+```
+
+保存源码 commit、镜像 ID/发布 digest、Go 和消费者日志。容器内 Go 测试与
+Java SDK 测试是独立证据；只完成编译不能代替验收。写故障接口见
+[可靠性控制](reliability.md)，Connector 使用范围见[协议与验收](connector-conformance.md)。
+
 标准 Dockerfile 的 release 阶段在 Linux 内编译 CGO。原生 Go 构建要求 C/C++ 编译器，不能用 CGO_ENABLED=0。Docker 运行层使用 Debian bookworm/glibc 2.36 + libstdc++6，非 Alpine。
 
 ## 本次验证的交叉构建

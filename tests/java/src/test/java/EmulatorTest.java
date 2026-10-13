@@ -552,7 +552,7 @@ public class EmulatorTest {
         "create table "
             + t
             + "(id bigint not null,s string,n bigint,primary key(id))"
-            + " tblproperties('transactional'='true')");
+            + " tblproperties('transactional'='true','acid.partial.fields.update.enable'='true')");
     sql("insert into " + t + " values(1,'keep',10)");
     var up = tunnel().buildUpsertSession("test_project", t).build();
     try (var stream = up.buildUpsertStream().build()) {

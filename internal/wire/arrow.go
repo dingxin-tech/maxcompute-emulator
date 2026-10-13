@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -42,9 +43,14 @@ func appendValue(b array.Builder, t engine.Type, v any) error {
 		x.Append(arrow.Date32(v.(time.Time).Unix() / 86400))
 	case *array.TimestampBuilder:
 		tm := v.(time.Time)
-		if t.Name == "datetime" {
+		switch x.Type().(*arrow.TimestampType).Unit {
+		case arrow.Second:
+			x.Append(arrow.Timestamp(tm.Unix()))
+		case arrow.Millisecond:
 			x.Append(arrow.Timestamp(tm.UnixMilli()))
-		} else {
+		case arrow.Microsecond:
+			x.Append(arrow.Timestamp(tm.UnixMicro()))
+		case arrow.Nanosecond:
 			x.Append(arrow.Timestamp(tm.UnixNano()))
 		}
 	case *array.Decimal128Builder:
@@ -86,14 +92,46 @@ func appendValue(b array.Builder, t engine.Type, v any) error {
 	return nil
 }
 func Arrow(r engine.Result, batchRows int, tunnel bool) ([]byte, error) {
-	return arrowEncode(r, batchRows, tunnel, "")
+	return arrowEncode(r, batchRows, tunnel, "", "", "")
 }
 
 // TunnelArrow compresses IPC buffers, preserving the outer Tunnel CRC framing.
 func TunnelArrow(r engine.Result, batchRows int, encoding string) ([]byte, error) {
-	return arrowEncode(r, batchRows, true, encoding)
+	return arrowEncode(r, batchRows, true, encoding, "", "")
 }
-func arrowEncode(r engine.Result, batchRows int, tunnel bool, encoding string) (out []byte, err error) {
+
+// StorageArrow encodes negotiated timestamp units and IPC buffer compression.
+func StorageArrow(r engine.Result, batchRows int, encoding, timestampUnit, datetimeUnit string) ([]byte, error) {
+	return arrowEncode(r, batchRows, false, encoding, timestampUnit, datetimeUnit)
+}
+func storageType(t engine.Type, timestampUnit, datetimeUnit string) arrow.DataType {
+	unit := ""
+	if t.Name == "timestamp" || t.Name == "timestamp_ntz" {
+		unit = timestampUnit
+	}
+	if t.Name == "datetime" {
+		unit = datetimeUnit
+	}
+	if unit != "" {
+		units := map[string]arrow.TimeUnit{"second": arrow.Second, "milli": arrow.Millisecond, "micro": arrow.Microsecond, "nano": arrow.Nanosecond}
+		return &arrow.TimestampType{Unit: units[unit]}
+	}
+	switch t.Name {
+	case "array":
+		return arrow.ListOf(storageType(t.Children[0], timestampUnit, datetimeUnit))
+	case "map":
+		return arrow.MapOf(storageType(t.Children[0], timestampUnit, datetimeUnit), storageType(t.Children[1], timestampUnit, datetimeUnit))
+	case "struct":
+		fields := []arrow.Field{}
+		for i, child := range t.Children {
+			fields = append(fields, arrow.Field{Name: t.Fields[i], Type: storageType(child, timestampUnit, datetimeUnit), Nullable: true})
+		}
+		return arrow.StructOf(fields...)
+	default:
+		return t.StorageArrow()
+	}
+}
+func arrowEncode(r engine.Result, batchRows int, tunnel bool, encoding, timestampUnit, datetimeUnit string) (out []byte, err error) {
 	defer func() {
 		if x := recover(); x != nil {
 			out = nil
@@ -104,7 +142,7 @@ func arrowEncode(r engine.Result, batchRows int, tunnel bool, encoding string) (
 	for _, c := range r.Columns {
 		typ := c.Parsed.Arrow()
 		if !tunnel {
-			typ = c.Parsed.StorageArrow()
+			typ = storageType(c.Parsed, timestampUnit, datetimeUnit)
 		}
 		fields = append(fields, arrow.Field{Name: c.Name, Type: typ, Nullable: true})
 	}
@@ -112,7 +150,14 @@ func arrowEncode(r engine.Result, batchRows int, tunnel bool, encoding string) (
 	var buf bytes.Buffer
 	var stream *ipc.Writer
 	if !tunnel {
-		stream = ipc.NewWriter(&buf, ipc.WithSchema(schema))
+		opts := []ipc.Option{ipc.WithSchema(schema)}
+		switch strings.ToLower(encoding) {
+		case "zstd":
+			opts = append(opts, ipc.WithZstd())
+		case "lz4_frame":
+			opts = append(opts, ipc.WithLZ4())
+		}
+		stream = ipc.NewWriter(&buf, opts...)
 	}
 	if batchRows < 1 {
 		batchRows = 4096

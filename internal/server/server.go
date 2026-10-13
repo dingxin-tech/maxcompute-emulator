@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dingxin-tech/maxcompute-emulator/internal/engine"
@@ -56,16 +57,20 @@ type instance struct {
 	MCQA *mcqaSession
 }
 type Server struct {
-	Engine    *engine.Engine
-	cfg       Config
-	mu        sync.Mutex
-	sessions  map[string]*session
-	instances map[string]*instance
-	writes    map[string]*writeSession
-	storage   map[string]*storageSession
-	inflight  chan struct{}
-	logKey    []byte
-	faults    map[string]*FaultRule
+	Engine           *engine.Engine
+	cfg              Config
+	mu               sync.Mutex
+	sessions         map[string]*session
+	instances        map[string]*instance
+	writes           map[string]*writeSession
+	storage          map[string]*storageSession
+	inflight         chan struct{}
+	logKey           []byte
+	faults           map[string]*FaultRule
+	activeWrites     atomic.Int64
+	peakWrites       atomic.Int64
+	activeDataWrites atomic.Int64
+	peakDataWrites   atomic.Int64
 }
 
 func New(e *engine.Engine, c Config) *Server {
@@ -121,6 +126,25 @@ func fail(w http.ResponseWriter, r *http.Request, status int, code string, e err
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	t := s.requestTrace(r)
 	r = withTrace(r, t)
+	if s.cfg.TestMode && t.Action != "" && (t.Plane == "storage" || t.Object == "upload" || t.Object == "upsert" || t.Object == "stream") {
+		active := s.activeWrites.Add(1)
+		for peak := s.peakWrites.Load(); active > peak; peak = s.peakWrites.Load() {
+			if s.peakWrites.CompareAndSwap(peak, active) {
+				break
+			}
+		}
+		defer s.activeWrites.Add(-1)
+	}
+	if s.cfg.TestMode && t.Action == "write" {
+		active := s.activeDataWrites.Add(1)
+		for peak := s.peakDataWrites.Load(); active > peak; peak = s.peakDataWrites.Load() {
+			if s.peakDataWrites.CompareAndSwap(peak, active) {
+				break
+			}
+		}
+		defer s.activeDataWrites.Add(-1)
+	}
+
 	sw := &statusWriter{ResponseWriter: w}
 	w = sw
 	start := time.Now()
@@ -162,7 +186,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 	r.Body = http.MaxBytesReader(w, r.Body, wire.MaxPayload)
 	if strings.HasPrefix(r.URL.Path, "/__test/") {
-		if r.URL.Path == "/__test/faults" || strings.HasPrefix(r.URL.Path, "/__test/faults/") {
+		if r.URL.Path == "/__test/write-metrics" && s.cfg.TestMode {
+			if r.Method == "POST" {
+				if s.activeWrites.Load() != 0 {
+					fail(w, r, 409, "InvalidState", fmt.Errorf("writes are active"))
+					return
+				}
+				s.peakWrites.Store(0)
+				s.peakDataWrites.Store(0)
+			}
+			jsonResponse(w, 200, map[string]any{"active": s.activeWrites.Load(), "peak": s.peakWrites.Load(), "active_data": s.activeDataWrites.Load(), "peak_data": s.peakDataWrites.Load()})
+		} else if r.URL.Path == "/__test/faults" || strings.HasPrefix(r.URL.Path, "/__test/faults/") {
 			s.faultsAPI(w, r)
 		} else {
 			http.NotFound(w, r)
@@ -193,6 +227,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 		}
 		jsonResponse(w, 200, map[string]string{"status": "ready", "version": Version})
+		return
+	}
+	if strings.HasPrefix(path, "storage/v1/") {
+		s.storageV1(w, r)
 		return
 	}
 	if path == "storage/v2" || path == "storage/v3" {
@@ -296,7 +334,7 @@ func tableXML(p, s string, t engine.Table) string {
 	reservedMap := map[string]any{"Transactional": t.Properties["transactional"] == "true", "PrimaryKey": append([]string{}, t.PrimaryKeys...), "schema_version": "1"}
 	if len(t.PrimaryKeys) > 0 {
 		reservedMap["ClusterType"] = "hash"
-		reservedMap["BucketNum"] = 1
+		reservedMap["BucketNum"] = t.BucketCount()
 		reservedMap["ClusterCols"] = t.PrimaryKeys
 	}
 	reserved, _ := json.Marshal(reservedMap)

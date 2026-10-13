@@ -2,7 +2,7 @@
 
 Go + DuckDB 实现的本地 MaxCompute 测试服务。**1.1.0** 支持 ClickHouse 当前 ODPS-CPP Tunnel 读表，以及 Java SDK 的 Tunnel 批量/流式上传、Upsert、实例结果下载、Storage API 批量/流式 Arrow 读写。[English](README.md) · [发布评审与元数据/Flink 支持范围](docs/release-readiness.md)。支持矩阵和回归用例见 [docs/data-transfer.md](docs/data-transfer.md)。
 
-`main` 为 Go 实现，原 Spring Boot/SQLite 版本保留在 [`legacy`](https://github.com/dingxin-tech/maxcompute-emulator/tree/legacy)。Storage v1 和分布式事务尚未实现。默认接受测试 AK/SK；可选 strict 模式检查本地测试凭据的签名、STS、日期和读写权限，适用于本地与 CI 测试环境。
+`main` 为 Go 实现，原 Spring Boot/SQLite 版本保留在 [`legacy`](https://github.com/dingxin-tech/maxcompute-emulator/tree/legacy)。开发候选版本支持 Storage v1 批量读取，发布的 1.1.0 镜像尚未包含；物理分片与分布式服务恢复未实现。见[Connector 协议与验收范围](docs/connector-conformance.md)。默认接受测试 AK/SK；可选 strict 模式检查本地测试凭据的签名、STS、日期和读写权限，适用于本地与 CI 测试环境。
 
 ## 启动镜像
 
@@ -98,7 +98,7 @@ v1 Testcontainers 的模式保留，但就绪条件改为 HTTP `/readyz`，无�
 | 会话 | 默认 TTL 30 分钟；完成/过期后不可恢复；仅运行期间有效 |
 | Arrow 分页 | Tunnel 单响应一批；指定 raw_size 时最多65,536行且至少返回一行；不指定则返回请求范围；Storage 按 MaxBatchRows 输出多批 |
 | 资源/函数 | 资源上传（单次 payload 或 Java SDK 分片+合并）、元数据读取、按 `rOffset`/`rSize` 下载、覆盖、删除、前缀与分页列举；TABLE 资源元数据；引用已存在资源的 Java/SQL/内嵌函数注册 |
-| 不支持 | Storage v1、Volume/Blob、增量/CDC/过滤表达式下推、UDF 执行（函数只有元数据，SQL `CREATE FUNCTION`/`DROP FUNCTION` 与调用 UDF 返回 `UnsupportedFeature`）、Volume 资源、授权模拟、异步 SQL、完整 ODPS 函数库/隐式转换语义 |
+| 不支持 | Storage v1 写入/物理分片/增量读取、Volume/Blob、增量/CDC/过滤表达式下推、UDF 执行（函数只有元数据，SQL `CREATE FUNCTION`/`DROP FUNCTION` 与调用 UDF 返回 `UnsupportedFeature`）、Volume 资源、授权模拟、异步 SQL、完整 ODPS 函数库/隐式转换语义 |
 
 资源 payload 上限 64 MiB/个、512 MiB/project+schema；资源名与函数名按大小写不敏感解析，回读保留上传时的大小写。
 

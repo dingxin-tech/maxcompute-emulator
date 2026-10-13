@@ -40,6 +40,25 @@ func (e *Engine) alterMetadata(ctx context.Context, tx *sql.Tx, ns string, ts []
 	}
 	action := word(ts[pos])
 	pos++
+	if action == "rename" {
+		if pos >= len(ts) || word(ts[pos]) != "to" || pos+2 != len(ts) || strings.Contains(ts[pos+1], ".") {
+			return fmt.Errorf("invalid RENAME target")
+		}
+		target := word(ts[pos+1])
+		if _, err := load(ctx, tx, ns, target); err == nil {
+			return fmt.Errorf("TableAlreadyExists: %s", target)
+		}
+		if _, err := tx.ExecContext(ctx, "ALTER TABLE "+Quote(name)+" RENAME TO "+Quote(target)); err != nil {
+			return err
+		}
+		t.Name = target
+		raw, err := json.Marshal(t)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE main.emulator_catalog SET name=?,definition=? WHERE namespace=? AND name=?", target, string(raw), ns, name)
+		return err
+	}
 	if action != "add" && action != "drop" {
 		return fmt.Errorf("UnsupportedFeature: ALTER %s", action)
 	}
@@ -63,7 +82,15 @@ func (e *Engine) alterMetadata(ctx context.Context, tx *sql.Tx, ns string, ts []
 		return err
 	}
 	if end != len(ts) {
-		return fmt.Errorf("unsupported ALTER suffix")
+		if action != "add" || word(ts[end]) != "partition" {
+			return fmt.Errorf("unsupported ALTER suffix")
+		}
+		// All clauses execute in the enclosing transaction; a later failure rolls back the statement.
+		if err = e.alterMetadata(ctx, tx, ns, ts[:end]); err != nil {
+			return err
+		}
+		remaining := append(append([]string{}, ts[:pos]...), ts[end:]...)
+		return e.alterMetadata(ctx, tx, ns, remaining)
 	}
 	key, err := partitionKey(t, part)
 	if err != nil {

@@ -146,6 +146,9 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) bool {
 		grants := c.Read
 		storageRead := false
 		path := strings.TrimPrefix(r.URL.Path, "/api")
+		if strings.HasPrefix(path, "/storage/v1/") && strings.HasSuffix(path, "/sessions") && r.Method == "POST" && r.URL.Query().Get("session_type") == "batch_read" {
+			storageRead = true
+		}
 		if path == "/storage/v2" || path == "/storage/v3" {
 			switch r.URL.Query().Get("Action") {
 			case "TableCreateReadSession", "TableGetReadSession", "TableRead", "InstanceCreateReadSession", "InstanceGetReadSession", "InstanceRead":
@@ -156,7 +159,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) bool {
 		// Only a Tunnel download create/complete establishes a read session, so
 		// it stays on read grants. A metadata-plane POST named "create" is a
 		// write: resources and functions are project objects, not read sessions.
-		readEstablishing := (t.Action == "create" || t.Action == "complete") && t.Plane != "rest"
+		readEstablishing := (t.Action == "create" || t.Action == "complete") && t.Plane == "tunnel" && t.Object == ""
 		if !storageRead && r.Method != "GET" && r.Method != "HEAD" && !readEstablishing {
 			grants = c.Write
 		}
