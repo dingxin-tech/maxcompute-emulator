@@ -1,33 +1,35 @@
-ClickHouse protocol fixes and local reliability test controls.
+MaxCompute Emulator 1.2.0 adds Connector-facing batch read contracts and write recovery test controls.
 
-- Fix Tunnel Arrow ZSTD/LZ4 IPC compression and missing project/partition errors.
-- Add JSON download lifecycle logs with session hashes and request ranges.
-- Add 12 opt-in protocol fault effects with expiration, hit budgets and cancellation.
-- Support default/named quotas and QuotaNotExist / FlowExceeded tests.
-- Add optional ODPS v2/v4/STS signature, date and local read/write ACL verification.
-- Add public SQL TIMESTAMP_NTZ, MAP construction, nested/empty collections and numeric fixtures.
+- Storage v1 batch read sessions, row ranges/resume, projection and Arrow/V5 negotiation.
+- Preserve nested timestamp units and Arrow IPC ZSTD/LZ4_FRAME compression.
+- Unicode CHAR/VARCHAR contracts, atomic rename/multi-partition updates and explicit partial-PK-update capabilities.
+- Test-only Tunnel/Storage write-stage HTTP errors, delays and lost acknowledgments after successful mutation; separate data-upload concurrency metrics.
+- SDK/JDBC offline and interactive SQL result paths, resource/function metadata and deterministic retry/authorization contracts.
 
 ```sh
-docker pull maxcompute/maxcompute-emulator:1.1.0
+docker pull --platform linux/amd64 maxcompute/maxcompute-emulator:1.2.0
 docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 \
-  maxcompute/maxcompute-emulator:1.1.0 --listen 0.0.0.0:8080 --seed /opt/emulator/seed.sql
+  maxcompute/maxcompute-emulator:1.2.0 --listen 0.0.0.0:8080 --seed /opt/emulator/seed.sql
 ```
 
-Use project `test_project` and point both service and Tunnel endpoints to the
-mapped port. Default authentication remains permissive; fault injection is off.
-See [reliability controls](https://github.com/dingxin-tech/maxcompute-emulator/blob/v1.1.0/docs/reliability.md) for strict credentials, test-mode
-network controls, quota configuration and `/opt/emulator/types.sql`.
+Use project `test_project` and the mapped port for both service and Tunnel endpoints.
+Pin the published image digest for reproducible consumer CI. The image is Linux AMD64;
+Apple Silicon runs it through Docker platform emulation. Fault APIs require opt-in
+`--test-mode --test-network` and a confined test network.
 
-**Validation:** Go race/vet in containers, Java SDK 0.61.2-public (33 tests,
-including strict Storage reads and row-disconnect recovery), and a pinned public
-C++ SDK Arrow wire probe (success, corrupt streams and one-shot recovery).
-Publication runs these gates before pushing and reruns Java against the remote
-image. Refer to the release Actions run for the published revision's results.
+Validation on the merged feature: Go race/vet, 48 Java SDK checks, 3 legacy SDK,
+3 JDBC, 33 PyODPS and the C++ Arrow/fault probe passed. The release workflow rebuilds
+from this tag, runs Go/SDK/C++ before publication and reruns SDK acceptance against
+the remote-pulled image. See the release Actions run for this exact tag's results.
 
-**Limits:** Full ClickHouse E2E has not been rerun for this release. The C++ probe
-is a wire-contract test, not the complete SDK HTTP client. Production quota,
-IAM/STS, routing and concurrency still require real MaxCompute acceptance.
-The Java SDK's Long.MIN_VALUE rejection remains an explicit negative test.
-Volume/Blob, Storage v1 and CDC remain unsupported. Session state is ephemeral;
-Flink checkpoint recovery is not certified. Retain the original `--project`
-when reusing a 1.0.0 DuckDB database; SQLite legacy data cannot be reused.
+Compatibility changes: partial PK updates now require
+`acid.partial.fields.update.enable=true`. Storage v2 SDK's default
+`CrossPartition=true` continues to read the logical snapshot; physical split
+planning remains unsupported. Existing consumers should review these contracts.
+
+Limits: Storage v1 writes/physical splits/incremental reads, CDC/DLMV, Volume/Blob,
+production IAM/quota/throughput and cross-node recovery remain outside the model.
+Transfer sessions and retry history are process-local. Connector append recovery
+is at-least-once; passing local checkpoint tests does not certify distributed cloud
+recovery or arbitrary end-to-end exactly-once behavior. See
+[Connector contracts](https://github.com/dingxin-tech/maxcompute-emulator/blob/v1.2.0/docs/connector-conformance.md).

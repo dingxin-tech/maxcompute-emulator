@@ -1,6 +1,8 @@
-# 1.1.0 兼容范围
+# 1.2.0 兼容范围
 
 1.1.0 增加P0协议修复、JSON日志、12类测试故障、命名quota、可选strict鉴权和SQL类型fixture，配置见 [reliability.md](reliability.md)。Go race/vet、Java SDK 33项与C++ Arrow wire正反例已验证；完整CK runner及真实MaxCompute鉴权/配额仍需独立验收。
+
+1.2.0 增加 Storage v1 批量读取、字符类型、原子 rename/分区操作和写阶段故障控制；验收范围见 [Connector 协议](connector-conformance.md)。
 
 以下保留1.0.0数据面与Flink范围；1.1.0未扩大Volume/Blob/CDC或checkpoint恢复承诺。
 
@@ -40,7 +42,7 @@
 
 默认 coordinator 模式的有界任务曾出现任务 FINISHED、12 行未提交的失败；该 connector 路径的 endInput 仅设置结束标志，异步会话尚未就绪时任务可结束。本服务可以复现该问题，不能据任务成功认定上传成功。使用者应核对行值和提交结果。
 
-可作为协议与上传正确性回归基座。尚未验证：checkpoint 故障恢复、跨作业 exactly-once、真实云端配额/鉴权/路由。Emulator 自身重启不保留 transfer session 和幂等历史，不能用来验收这些云端保证。CDC、Volume、Blob 仍不支持。开发候选版本的 Storage v1 批量读取、写故障和 Connector 本地 checkpoint 验收见 [Connector 协议与范围](connector-conformance.md)；这不增加云端或跨进程恢复保证。
+可作为协议与上传正确性回归基座。尚未验证：checkpoint 故障恢复、跨作业 exactly-once、真实云端配额/鉴权/路由。Emulator 自身重启不保留 transfer session 和幂等历史，不能用来验收这些云端保证。CDC、Volume、Blob 仍不支持。1.2.0 的 Storage v1 批量读取、写故障和 Connector 本地 checkpoint 验收见 [Connector 协议与范围](connector-conformance.md)；这不增加云端或跨进程恢复保证。
 
 ## 发布验证
 

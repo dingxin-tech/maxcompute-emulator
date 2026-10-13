@@ -1,8 +1,8 @@
 # Connector-facing protocol contracts
 
-These changes are on the development branch and are not in the published 1.1.0
-image. Build a candidate from the repository [Dockerfile](../Dockerfile) and record
-its source commit and image identity. They support local SDK/Connector correctness
+These contracts are included in version 1.2.0. Build from the repository
+[Dockerfile](../Dockerfile), or use the published version pinned by image digest.
+Record its source commit and image identity. They support local SDK/Connector correctness
 tests; they do not reproduce the distributed MaxCompute service.
 
 ## Storage v1 batch reads

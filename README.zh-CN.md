@@ -1,17 +1,17 @@
 # MaxCompute Emulator
 
-Go + DuckDB 实现的本地 MaxCompute 测试服务。**1.1.0** 支持 ClickHouse 当前 ODPS-CPP Tunnel 读表，以及 Java SDK 的 Tunnel 批量/流式上传、Upsert、实例结果下载、Storage API 批量/流式 Arrow 读写。[English](README.md) · [发布评审与元数据/Flink 支持范围](docs/release-readiness.md)。支持矩阵和回归用例见 [docs/data-transfer.md](docs/data-transfer.md)。
+Go + DuckDB 实现的本地 MaxCompute 测试服务。**1.2.0** 支持 ClickHouse 当前 ODPS-CPP Tunnel 读表，以及 Java SDK 的 Tunnel 批量/流式上传、Upsert、实例结果下载、Storage API 批量/流式 Arrow 读写。[English](README.md) · [发布评审与元数据/Flink 支持范围](docs/release-readiness.md)。支持矩阵和回归用例见 [docs/data-transfer.md](docs/data-transfer.md)。
 
-`main` 为 Go 实现，原 Spring Boot/SQLite 版本保留在 [`legacy`](https://github.com/dingxin-tech/maxcompute-emulator/tree/legacy)。开发候选版本支持 Storage v1 批量读取，发布的 1.1.0 镜像尚未包含；物理分片与分布式服务恢复未实现。见[Connector 协议与验收范围](docs/connector-conformance.md)。默认接受测试 AK/SK；可选 strict 模式检查本地测试凭据的签名、STS、日期和读写权限，适用于本地与 CI 测试环境。
+`main` 为 Go 实现，原 Spring Boot/SQLite 版本保留在 [`legacy`](https://github.com/dingxin-tech/maxcompute-emulator/tree/legacy)。1.2.0 支持 Storage v1 批量读取；物理分片与分布式服务恢复未实现。见[Connector 协议与验收范围](docs/connector-conformance.md)。默认接受测试 AK/SK；可选 strict 模式检查本地测试凭据的签名、STS、日期和读写权限，适用于本地与 CI 测试环境。
 
 ## 启动镜像
 
 交付包中的镜像为 Linux amd64；Apple Silicon 通过 Docker 的 amd64 模拟运行。
 
 ```bash
-docker pull maxcompute/maxcompute-emulator:1.1.0
+docker pull maxcompute/maxcompute-emulator:1.2.0
 docker run --rm --name mc-emulator --platform linux/amd64 \
-  -p 127.0.0.1:8080:8080 maxcompute/maxcompute-emulator:1.1.0 \
+  -p 127.0.0.1:8080:8080 maxcompute/maxcompute-emulator:1.2.0 \
   --listen 0.0.0.0:8080 --seed /opt/emulator/seed.sql
 curl -fsS http://127.0.0.1:8080/readyz
 ```
@@ -29,7 +29,7 @@ curl -fsS http://127.0.0.1:8080/readyz
 ```bash
 docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 \
   -v "$PWD/fixtures.sql:/fixtures.sql:ro" \
-  maxcompute/maxcompute-emulator:1.1.0 \
+  maxcompute/maxcompute-emulator:1.2.0 \
   --listen 0.0.0.0:8080 --seed /fixtures.sql --project test_project
 ```
 
@@ -43,11 +43,11 @@ docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 \
 mvn -B -f tests/java/pom.xml test
 ```
 
-默认通过 Testcontainers 启动本地 `maxcompute/maxcompute-emulator:1.1.0`，动态分配端口，等待 `/readyz`，运行后销毁容器。可指定 `-Demulator.image=自定义镜像名:版本`；验证已启动服务用 `-Demulator.endpoint=http://127.0.0.1:8080`。
+默认通过 Testcontainers 启动本地 `maxcompute/maxcompute-emulator:1.2.0`，动态分配端口，等待 `/readyz`，运行后销毁容器。可指定 `-Demulator.image=自定义镜像名:版本`；验证已启动服务用 `-Demulator.endpoint=http://127.0.0.1:8080`。
 
 ```java
 try (GenericContainer<?> mc = new GenericContainer<>(
-        DockerImageName.parse("maxcompute/maxcompute-emulator:1.1.0"))
+        DockerImageName.parse("maxcompute/maxcompute-emulator:1.2.0"))
         .withExposedPorts(8080)
         .waitingFor(Wait.forHttp("/readyz"))) {
     mc.start();
@@ -110,7 +110,7 @@ DATETIME/TIMESTAMP 常量、STRING cast、ARRAY 构造与 NAMED_STRUCT 有显式
 改动它们是契约决策，不是文档修订。决策落地之前，本节就是跟踪清单——若你的实测与某一行的读数冲突，
 请带两侧读数和 request id 开 issue。
 
-两格说的都是 `main`，已发布的镜像不在这两格里。2026-10-08 直接对 `maxcompute/maxcompute-emulator:1.1.0`（digest `sha256:57d1d25757255a1f16d0a3c34ef8b99c24bf8615e1c14c13dfd5a41026dee2d3`）复核：`GET /projects/<project>/resources` 回 `404` + `UnsupportedOperation: unsupported endpoint`，`/capabilities` 既未声明 `resources` 也未声明 `functions`；当前 PyODPS 契约探针打在该镜像上收尾是 `1 passed, 32 failed`，唯一通过的那格也是因为整个端点被拒才通过。这与 2026-09-21 打在 `1.1.0` 源码构建上的 `1 passed, 29 failed` 同形——用例数随探针增长，"能力不存在"这个答复没变。也就是说 `1.1.0` 上根本没有这两格可比的对象：要用资源面请从源码构建，或等 `1.1.0` 之后的 tag。
+两格描述的是 1.1.0 之后、1.2.0 保留的实现；旧的 1.1.0 镜像不在这两格里。2026-10-08 直接对 `maxcompute/maxcompute-emulator:1.1.0`（digest `sha256:57d1d25757255a1f16d0a3c34ef8b99c24bf8615e1c14c13dfd5a41026dee2d3`）复核：`GET /projects/<project>/resources` 回 `404` + `UnsupportedOperation: unsupported endpoint`，`/capabilities` 既未声明 `resources` 也未声明 `functions`；当前 PyODPS 契约探针打在该镜像上收尾是 `1 passed, 32 failed`，唯一通过的那格也是因为整个端点被拒才通过。这与 2026-09-21 打在 `1.1.0` 源码构建上的 `1 passed, 29 failed` 同形——用例数随探针增长，"能力不存在"这个答复没变。也就是说 `1.1.0` 上根本没有这两格可比的对象：要用资源面请从源码构建，或等 `1.1.0` 之后的 tag。
 
 ### 1. 被拒绝的分片合并，状态码与错误码不同
 
@@ -189,7 +189,7 @@ go test ./...
 go run ./cmd/emulator --seed examples/seed.sql
 
 # 标准 Linux Docker 源码构建（CGO 开启）
-docker build --platform linux/amd64 -t maxcompute/maxcompute-emulator:1.1.0 .
+docker build --platform linux/amd64 -t maxcompute/maxcompute-emulator:1.2.0 .
 
 # 镜像加载/构建后，真实 Java SDK 容器验收
 mvn -B -f tests/java/pom.xml test

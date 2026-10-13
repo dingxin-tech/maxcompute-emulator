@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Document the two measured divergences from the live service in README - the status and error codes a refused chunked merge returns (`500`/`409` with `ODPS-0421213`/`ODPS-0421121` in the cloud, `400` here) and a `TABLE` resource that is created even when its table is missing (`404 NoSuchObject` in the cloud) - with what each measurement did and did not cover, and correct `docs/protocol.md`, which still said the service's HTTP status had not been read back and named `InvalidParameter` where the emulator answers `ResourceAlreadyExists`. No behavior changed.
+
+## 1.2.0 — 2026-10-13
+
 - Add Storage v1 batch read sessions, row-range/projection validation and Arrow/V5 negotiation; unsupported physical/incremental planning remains explicit.
 - Preserve all Arrow timestamp units, nested timestamps and IPC ZSTD/LZ4_FRAME compression.
 - Add Unicode CHAR/VARCHAR schema and transfer contracts, transactional table rename and atomic multi-partition additions.
