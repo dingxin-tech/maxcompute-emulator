@@ -193,3 +193,17 @@ Use data counters for pressure evidence; concurrent session creation alone is no
 concurrent data upload. `POST /__test/write-metrics` resets counters only while idle.
 Assert active counters return to zero after cancellation/cleanup. This measures
 local request overlap, not production throughput or service durability.
+
+## Concurrent admission capacity
+
+`--max-concurrent-requests` controls concurrently admitted HTTP requests; the default
+is 256, and the CLI accepts 1–16384. This is an in-flight admission limit, not a QPS
+or bandwidth quota. Requests beyond it return 429/FlowExceeded and `Retry-After: 1`
+before parsing or executing SQL, creating sessions, or mutating data. The slot is
+released when the admitted handler exits, including cancellation and failure.
+
+For pressure journeys, size admission capacity for the total client fan-out, including
+SDK/background workers and multiple sinks. Set a low value in a separate throttling
+journey to verify rejection and retry. Fault injection can independently emit bounded
+429 responses with the normal protocol error body. Test write metrics count only
+admitted requests; rejected arrivals do not inflate data-upload concurrency evidence.

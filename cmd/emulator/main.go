@@ -26,6 +26,7 @@ func main() {
 	public := flag.String("public-endpoint", "", "advertised endpoint; default request Host")
 	ttl := flag.Duration("session-ttl", 30*time.Minute, "data transfer session lifetime")
 	maxSessions := flag.Int("max-sessions", 64, "maximum sessions per transfer API")
+	maxRequests := flag.Int("max-concurrent-requests", 256, "maximum concurrently admitted HTTP requests (excess returns 429/FlowExceeded)")
 	maxRows := flag.Int("max-rows", 100000, "maximum rows per result/session")
 	testMode := flag.Bool("test-mode", false, "enable bounded test fault API")
 	testNetwork := flag.Bool("test-network", false, "explicitly allow test mode on a container/test network")
@@ -34,6 +35,10 @@ func main() {
 	credentials := flag.String("auth-config", "", "JSON file of local test AK credentials and ACLs")
 	logFormat := flag.String("log-format", "json", "json or text")
 	flag.Parse()
+	if *maxRequests < 1 || *maxRequests > 16384 {
+		slog.Error("max-concurrent-requests must be between 1 and 16384")
+		os.Exit(1)
+	}
 	if *logFormat == "json" {
 		slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	} else if *logFormat != "text" {
@@ -85,7 +90,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	s := &http.Server{Addr: *listen, Handler: server.New(e, server.Config{TestMode: *testMode, Quotas: quotaNames, AuthMode: *authMode, Credentials: creds, Project: *project, PublicEndpoint: *public, SessionTTL: *ttl, MaxSessions: *maxSessions}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
+	s := &http.Server{Addr: *listen, Handler: server.New(e, server.Config{TestMode: *testMode, Quotas: quotaNames, AuthMode: *authMode, Credentials: creds, Project: *project, PublicEndpoint: *public, SessionTTL: *ttl, MaxSessions: *maxSessions, MaxConcurrentRequests: *maxRequests}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(done)

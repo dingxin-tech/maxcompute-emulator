@@ -236,7 +236,7 @@ Mount SQL fixtures read-only and pass `--seed /fixtures.sql --project your_proje
 
 Committed data and table metadata persist; transfer sessions and retry history do not survive restarts. **Legacy SQLite files are incompatible with DuckDB**: recreate fixtures when migrating. Legacy consumers can keep using a pinned `0.0.x` image.
 
-Defaults: 100,000 rows per result, 64 MiB estimated decoded data per write session, 64 sessions per transfer API, 30-minute session TTL and 16 concurrent requests. Use fresh containers per test suite or configure `--max-sessions`, `--session-ttl` and `--max-rows`. Limits are documented in [compatibility notes](docs/release-readiness.md); they do not constitute a process RSS guarantee.
+Defaults: 100,000 rows per result, 64 MiB estimated decoded data per write session, 64 sessions per transfer API, 30-minute session TTL and 256 concurrent requests. Admission above `--max-concurrent-requests` returns HTTP 429/FlowExceeded with `Retry-After: 1` before executing the request. Use fresh containers per test suite or configure `--max-concurrent-requests` (1–16384), `--max-sessions`, `--session-ttl` and `--max-rows`. Limits are documented in [compatibility notes](docs/release-readiness.md); they do not constitute a process RSS guarantee.
 
 ## Build and contribute
 
