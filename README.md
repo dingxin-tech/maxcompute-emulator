@@ -2,7 +2,7 @@
 
 [简体中文](README.zh-CN.md) · [Docker Hub](https://hub.docker.com/r/maxcompute/maxcompute-emulator) · [Compatibility](docs/release-readiness.md) · [Changelog](CHANGELOG.md)
 
-Run a local MaxCompute-compatible service for SDK development and integration tests. Version **1.1.0** is a Go + DuckDB rewrite with SQL fixtures, table and partition metadata, Tunnel Protobuf/Arrow transfers, and Storage API v2.
+Run a local MaxCompute-compatible service for SDK development and integration tests. Version **1.1.0** is a Go + DuckDB rewrite with SQL fixtures, table and partition metadata, Tunnel Protobuf/Arrow transfers, and Storage API v2. Development candidates additionally support Storage v1 batch reads; see [Connector contracts](docs/connector-conformance.md).
 
 `main` contains the Go implementation. The previous Spring Boot + SQLite implementation is preserved on [`legacy`](https://github.com/dingxin-tech/maxcompute-emulator/tree/legacy); its existing image tags remain available.
 
@@ -93,7 +93,7 @@ session plane; `interactiveMode=maxqa` is refused by name.
 | Tunnel | Protobuf and Arrow batch upload/download; stream upload; Upsert/delete/partial updates; instance result download |
 | Storage API v1 | Batch read session create/reload and Arrow data reads, projections and row ranges |
 | Storage API v2 | Arrow read/write, Batch/BatchCompatible/Streaming/StreamingRealtime sessions, commit/abort, projections and partition selection |
-| Types | Integers, floating point, BOOLEAN, STRING/BINARY, DECIMAL (precision ≤38), DATE/DATETIME/TIMESTAMP, ARRAY/MAP/STRUCT |
+| Types | Integers, floating point, BOOLEAN, STRING/BINARY, CHAR/VARCHAR, DECIMAL (precision ≤38), DATE/DATETIME/TIMESTAMP, ARRAY/MAP/STRUCT |
 | Correctness checks | CRC, schema validation, session isolation, transactional commits, bounded retry tracking and stale-table write rejection |
 
 See [data transfer](docs/data-transfer.md) and [protocol details](docs/protocol.md) for exact combinations and limits. Java SDK Storage v2 uses `/api/storage/v3`; both v2 and v3 paths are accepted.

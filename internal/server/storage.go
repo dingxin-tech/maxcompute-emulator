@@ -89,6 +89,9 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 	if !s.checkProject(w, r, p) {
 		return
 	}
+	if !s.beforeProjectRequest(w, r) {
+		return
+	}
 	req := storageRequest{}
 	if action != "TableWrite" {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
@@ -286,6 +289,9 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 		for k, st := range v.Streams {
 			streams[k] = st.Version
 		}
+		if afterWriteFault(w, r) {
+			return
+		}
 		jsonResponse(w, 200, map[string]any{"SessionId": v.ID, "SessionStatus": v.Status, "Streams": streams, "MinUncommittedStagingId": "0"})
 	case "TableAbortWriteSession":
 		if v.Status == "COMMITTED" {
@@ -333,6 +339,9 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 			for _, st := range v.Streams {
 				st.Rows = nil
 			}
+		}
+		if afterWriteFault(w, r) {
+			return
 		}
 		jsonResponse(w, 200, map[string]any{})
 	case "TableCreateWriteStream", "TableGetWriteStream", "TableCloseWriteStream", "TableWrite":
@@ -444,7 +453,13 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 			if st.Exactly {
 				st.Requests[offset] = hash
 			}
+			if afterWriteFault(w, r) {
+				return
+			}
 			jsonResponse(w, 200, map[string]any{"ExactlyOnceRowOffset": st.Offset, "StagingId": strconv.FormatInt(st.Offset, 10)})
+			return
+		}
+		if afterWriteFault(w, r) {
 			return
 		}
 		jsonResponse(w, 200, map[string]any{"TableSchema": storageWriteSchema(v), "TableId": v.Meta.ID, "SchemaVersion": 1, "LatestSchemaVersion": 1, "RowOffset": st.Offset, "status": 0, "recordCount": st.Offset, "AccessToken": "emulator", "QuotaToken": "emulator"})

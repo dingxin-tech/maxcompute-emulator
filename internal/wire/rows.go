@@ -74,7 +74,7 @@ func (e *encoder) value(t engine.Type, v any) error {
 		}
 		e.sum([]byte{n})
 		e.u(uint64(n))
-	case "string", "binary", "decimal":
+	case "string", "char", "varchar", "binary", "decimal":
 		b := Bytes(v)
 		e.sum(b)
 		e.u(uint64(len(b)))

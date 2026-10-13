@@ -155,3 +155,42 @@ strict-mode Testcontainer. The C++ wire probe accepts `--faults` against a
 separate test-mode container; it verifies that corrupted Arrow streams fail
 and the subsequent normal request succeeds. It is not the complete SDK HTTP
 client or ClickHouse E2E runner.
+
+## Write-stage faults (development candidate)
+
+Build the development candidate for these controls; the published 1.1.0 image does
+not include them. Enable `--test-mode --test-network` with a loopback host port as
+above. Select an explicit plane, object, action and UUID table so unrelated reads
+and metadata requests cannot consume the fault.
+
+| Plane | Object | Actions |
+| --- | --- | --- |
+| `tunnel` | `upload`, `upsert`, `stream` | `create`, `reload`, `write`, `commit`, `abort` |
+| `storage` | `write` | `create_session`, `create_stream`, `write`, `close_stream`, `commit` |
+
+Only requests actually sent by the SDK can trigger a stage. For example, Storage
+realtime may create streams and write without batch close/commit; a consumer test
+must not claim those stages merely because the rule was installed.
+
+```sh
+curl -X PUT http://127.0.0.1:8080/__test/faults/write-ack \
+  -H 'Content-Type: application/json' -d '{
+  "match":{"plane":"storage","object":"write","action":"write",
+           "project":"test_project","table":"case_uuid","attempt":3},
+  "effect":{"type":"lost_ack"},"times":1,"ttl_seconds":60
+}'
+curl http://127.0.0.1:8080/__test/faults/write-ack
+```
+
+Write rules accept `http_error` (explicit status 400–599), `delay` and `lost_ack`.
+HTTP errors occur before mutation. Lost ACK executes the ordinary mutation, then
+closes the connection before the success response reaches the client. Retrying uses
+the normal session/block/pack identity; injection adds no deduplication behavior.
+An `attempt` ordinal counts matching requests, not committed checkpoints. Assert
+that every planned rule has hits and independently read back the resulting rows.
+
+`GET /__test/write-metrics` returns `active`, `peak`, `active_data` and `peak_data`.
+Use data counters for pressure evidence; concurrent session creation alone is not
+concurrent data upload. `POST /__test/write-metrics` resets counters only while idle.
+Assert active counters return to zero after cancellation/cleanup. This measures
+local request overlap, not production throughput or service durability.

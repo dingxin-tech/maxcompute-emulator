@@ -193,12 +193,14 @@ func bindValue(v any) any {
 	}
 	return v
 }
-func writePlaceholder(c Column) string { return "CAST(? AS " + c.Parsed.Duck() + ")" }
+func writePlaceholder(c Column) string {
+	return c.Parsed.StringExpression("CAST(? AS " + c.Parsed.Duck() + ")")
+}
 
 // Bind complex values recursively: the DuckDB driver's direct list binding
 // panics on NULL elements. Every leaf remains a bound parameter, including binary.
 func bindExpression(t Type, v any) (string, []any) {
-	cast := func(expr string) string { return "CAST(" + expr + " AS " + t.Duck() + ")" }
+	cast := func(expr string) string { return t.StringExpression("CAST(" + expr + " AS " + t.Duck() + ")") }
 	if v == nil {
 		return cast("?"), []any{nil}
 	}

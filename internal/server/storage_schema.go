@@ -18,9 +18,12 @@ func writeSchema(cols []engine.Column) map[string]any {
 	return map[string]any{"DataColumns": data, "PartitionColumns": []any{}, "SystemColumns": []any{}}
 }
 func storageType(name string, t engine.Type, nullable bool, n *int) map[string]any {
-	codes := map[string]int{"bigint": 0, "double": 1, "boolean": 2, "datetime": 3, "string": 4, "decimal": 5, "tinyint": 6, "smallint": 7, "int": 8, "binary": 11, "date": 12, "timestamp": 13, "float": 14, "array": 17, "map": 18, "struct": 19, "timestamp_ntz": 21}
+	codes := map[string]int{"bigint": 0, "double": 1, "boolean": 2, "datetime": 3, "string": 4, "decimal": 5, "tinyint": 6, "smallint": 7, "int": 8, "char": 9, "varchar": 10, "binary": 11, "date": 12, "timestamp": 13, "float": 14, "array": 17, "map": 18, "struct": 19, "timestamp_ntz": 21}
 	out := map[string]any{"MemberName": name, "ColumnId": *n, "Type": codes[t.Name], "Nullable": nullable, "Precision": t.Precision, "Scale": t.Scale}
 	*n++
+	if t.Name == "char" || t.Name == "varchar" {
+		out["SpecifiedLength"] = t.Precision
+	}
 	children := []any{}
 	for i, c := range t.Children {
 		name := "element"

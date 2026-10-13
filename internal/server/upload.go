@@ -121,6 +121,9 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, p, sc, t, kind s
 		}
 		s.writes[v.ID] = v
 		s.mu.Unlock()
+		if afterWriteFault(w, r) {
+			return
+		}
 		jsonResponse(w, 200, writeJSON(v, r.Host))
 		return
 	}
@@ -135,6 +138,9 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, p, sc, t, kind s
 	defer v.mu.Unlock()
 	switch r.Method {
 	case "GET":
+		if afterWriteFault(w, r) {
+			return
+		}
 		jsonResponse(w, 200, writeJSON(v, r.Host))
 	case "DELETE":
 		if v.Status == "committed" || v.Status == "closed" {
@@ -144,6 +150,9 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, p, sc, t, kind s
 		v.Status = "aborted"
 		v.Blocks = map[int64]engine.Result{}
 		v.Bytes = 0
+		if afterWriteFault(w, r) {
+			return
+		}
 		jsonResponse(w, 200, writeJSON(v, r.Host))
 	case "POST":
 		if v.Status == "aborted" {
@@ -190,6 +199,9 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, p, sc, t, kind s
 				b.Bytes = 0
 				v.Blocks[k] = b
 			}
+		}
+		if afterWriteFault(w, r) {
+			return
 		}
 		jsonResponse(w, 200, writeJSON(v, r.Host))
 	case "PUT":
@@ -279,6 +291,9 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, p, sc, t, kind s
 			v.Requests[trace] = hash
 			v.RequestSequence[trace] = v.Sequence
 		}
+		if afterWriteFault(w, r) {
+			return
+		}
 		writeHeaders(w, r.Host, v.Sequence)
 		jsonResponse(w, 200, map[string]any{"RecordCount": len(data.Rows), "ContentHash": fmt.Sprintf("%x", sha256.Sum256(body))})
 	default:
@@ -303,7 +318,11 @@ func writeJSON(v *writeSession, host string) map[string]any {
 		return map[string]any{"session_name": v.ID, "schema": schema, "schema_version": "1", "slots": [][]string{{"0", host}}, "status": v.Status, "quota_name": v.Quota}
 	}
 	if v.Kind == "upsert" {
-		return map[string]any{"id": v.ID, "schema": schema, "hash_key": v.Meta.PrimaryKeys, "hasher": "default", "slots": []any{map[string]any{"slot_id": "0", "worker_addr": host, "buckets": []int{0}}}, "status": v.Status, "quota_name": v.Quota, "enable_partial_update": true}
+		buckets := make([]int, v.Meta.BucketCount())
+		for i := range buckets {
+			buckets[i] = i
+		}
+		return map[string]any{"id": v.ID, "schema": schema, "hash_key": v.Meta.PrimaryKeys, "hasher": "default", "slots": []any{map[string]any{"slot_id": "0", "worker_addr": host, "buckets": buckets}}, "status": v.Status, "quota_name": v.Quota, "enable_partial_update": strings.EqualFold(v.Meta.Properties["acid.partial.fields.update.enable"], "true")}
 	}
 	blocks := []any{}
 	for _, k := range blockIDs(v) {

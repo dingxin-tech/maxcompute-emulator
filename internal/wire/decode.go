@@ -64,7 +64,7 @@ func (d *decoder) value(t engine.Type) (value any, err error) {
 			return nil, e
 		}
 		return math.Float64frombits(binary.LittleEndian.Uint64(b)), nil
-	case "string", "binary", "decimal":
+	case "string", "char", "varchar", "binary", "decimal":
 		n, e := d.u()
 		if e != nil || n > MaxPayload {
 			return nil, fmt.Errorf("invalid field size")

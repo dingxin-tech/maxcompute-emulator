@@ -40,7 +40,7 @@
 
 默认 coordinator 模式的有界任务曾出现任务 FINISHED、12 行未提交的失败；该 connector 路径的 endInput 仅设置结束标志，异步会话尚未就绪时任务可结束。本服务可以复现该问题，不能据任务成功认定上传成功。使用者应核对行值和提交结果。
 
-可作为协议与上传正确性回归基座。尚未验证：checkpoint 故障恢复、跨作业 exactly-once、真实云端配额/鉴权/路由。Emulator 自身重启不保留 transfer session 和幂等历史，不能用来验收这些云端保证。CDC、Volume、Blob、Storage v1 仍不支持。
+可作为协议与上传正确性回归基座。尚未验证：checkpoint 故障恢复、跨作业 exactly-once、真实云端配额/鉴权/路由。Emulator 自身重启不保留 transfer session 和幂等历史，不能用来验收这些云端保证。CDC、Volume、Blob 仍不支持。开发候选版本的 Storage v1 批量读取、写故障和 Connector 本地 checkpoint 验收见 [Connector 协议与范围](connector-conformance.md)；这不增加云端或跨进程恢复保证。
 
 ## 发布验证
 

@@ -44,6 +44,19 @@ func ParseType(s string) (Type, error) {
 		body := s[i+1 : len(s)-1]
 		parts := splitTypes(body)
 		switch t.Name {
+		case "char", "varchar":
+			if len(parts) != 1 {
+				return t, fmt.Errorf("invalid character length")
+			}
+			n, err := strconv.Atoi(parts[0])
+			max := 65535
+			if t.Name == "char" {
+				max = 255
+			}
+			if err != nil || n < 1 || n > max {
+				return t, fmt.Errorf("invalid character length")
+			}
+			t.Precision = n
 		case "decimal":
 			if len(parts) != 2 {
 				return t, fmt.Errorf("DECIMAL requires precision,scale")
@@ -108,7 +121,7 @@ func splitTypes(s string) []string {
 }
 func (t Type) Duck() string {
 	switch t.Name {
-	case "string":
+	case "string", "char", "varchar":
 		return "VARCHAR"
 	case "binary":
 		return "BLOB"
@@ -147,7 +160,7 @@ func (t Type) Arrow() arrow.DataType {
 		return arrow.PrimitiveTypes.Float64
 	case "boolean":
 		return arrow.FixedWidthTypes.Boolean
-	case "string", "binary":
+	case "string", "char", "varchar", "binary":
 		return arrow.BinaryTypes.Binary
 	case "date":
 		return arrow.FixedWidthTypes.Date32
@@ -174,7 +187,7 @@ func (t Type) Arrow() arrow.DataType {
 // StorageArrow uses UTF-8 strings; Tunnel uses binary buffers for STRING.
 func (t Type) StorageArrow() arrow.DataType {
 	switch t.Name {
-	case "string":
+	case "string", "char", "varchar":
 		return arrow.BinaryTypes.String
 	case "array":
 		return arrow.ListOf(t.Children[0].StorageArrow())
@@ -194,4 +207,26 @@ func Quote(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"
 func NewColumn(name, typ string) (Column, error) {
 	t, e := ParseType(typ)
 	return Column{Name: strings.ToLower(name), Type: strings.ToLower(strings.ReplaceAll(typ, "`", "")), Nullable: true, Parsed: t}, e
+}
+
+// Character limits count Unicode code points; CHAR stores its unpadded value.
+func (t Type) StringExpression(expr string) string {
+	if t.Name != "char" && t.Name != "varchar" {
+		return expr
+	}
+	expr = fmt.Sprintf("left(CAST(%s AS VARCHAR),%d)", expr, t.Precision)
+	if t.Name == "char" {
+		expr = "rtrim(" + expr + ",' ')"
+	}
+	return expr
+}
+
+// BucketCount describes the declared logical distribution groups. Physical
+// bucket split reads remain unsupported and are rejected by the Storage API.
+func (t Table) BucketCount() int {
+	n, err := strconv.Atoi(t.Properties["write.bucket.num"])
+	if err == nil && n > 0 && n <= 1024 {
+		return n
+	}
+	return 1
 }
