@@ -1,0 +1,54 @@
+name: Package published Docker image
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing stable release version
+        required: true
+        default: '1.2.0'
+      digest:
+        description: Published image sha256 digest
+        required: true
+        default: 'sha256:c4f708449e309cdb6900641b7d90097e6c9b2633a943dac382c27683fc3daf5f'
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ inputs.version }}
+      DIGEST: ${{ inputs.digest }}
+      IMAGE_REPO: maxcompute/maxcompute-emulator
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify published image and source tag
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          IMAGE="$IMAGE_REPO@$DIGEST"
+          docker pull --platform linux/amd64 "$IMAGE"
+          test "$(docker image inspect "$IMAGE" --format '{{.Architecture}}')" = amd64
+          test "$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')" = "$VERSION"
+          git fetch origin "refs/tags/v$VERSION:refs/tags/v$VERSION"
+          test "$(git rev-parse "v$VERSION^{commit}")" = "$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+          docker image inspect "$IMAGE" > image-inspect.json
+          docker tag "$IMAGE" "$IMAGE_REPO:$VERSION"
+      - name: Package and publish offline archive
+        run: |
+          archive="maxcompute-emulator-$VERSION-linux-amd64.tar.gz"
+          docker save "$IMAGE_REPO:$VERSION" | gzip -1 > "$archive"
+          sha256sum "$archive" > "$archive.sha256"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          image = json.loads(Path('image-inspect.json').read_text())[0]
+          Path('maxcompute-emulator-' + os.environ['VERSION'] + '-image.json').write_text(json.dumps({
+              'version': os.environ['VERSION'],
+              'image': os.environ['IMAGE_REPO'] + '@' + os.environ['DIGEST'],
+              'image_id': image['Id'], 'platform': 'linux/amd64',
+              'source_commit': image['Config']['Labels']['org.opencontainers.image.revision']
+          }, indent=2) + '\n')
+          PY
+          gh release upload "v$VERSION" "$archive" "$archive.sha256" "maxcompute-emulator-$VERSION-image.json"
