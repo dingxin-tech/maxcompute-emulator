@@ -27,18 +27,19 @@ import (
 	"github.com/pierrec/lz4/v4"
 )
 
-const Version = "1.2.0"
+const Version = "1.2.1"
 
 type Config struct {
-	Project        string
-	SessionTTL     time.Duration
-	MaxSessions    int
-	PublicEndpoint string
-	QueryTimeout   time.Duration
-	TestMode       bool
-	Quotas         []string
-	AuthMode       string
-	Credentials    map[string]Credential
+	Project               string
+	SessionTTL            time.Duration
+	MaxSessions           int
+	MaxConcurrentRequests int
+	PublicEndpoint        string
+	QueryTimeout          time.Duration
+	TestMode              bool
+	Quotas                []string
+	AuthMode              string
+	Credentials           map[string]Credential
 }
 type session struct {
 	ID, Project, Schema, Table, Partition, Quota string
@@ -74,6 +75,9 @@ type Server struct {
 }
 
 func New(e *engine.Engine, c Config) *Server {
+	if c.MaxConcurrentRequests <= 0 {
+		c.MaxConcurrentRequests = 256
+	}
 	if c.Project == "" {
 		c.Project = "test_project"
 	}
@@ -86,7 +90,7 @@ func New(e *engine.Engine, c Config) *Server {
 	if c.QueryTimeout == 0 {
 		c.QueryTimeout = 30 * time.Second
 	}
-	return &Server{logKey: []byte(id()), faults: map[string]*FaultRule{}, Engine: e, cfg: c, sessions: map[string]*session{}, instances: map[string]*instance{}, writes: map[string]*writeSession{}, storage: map[string]*storageSession{}, inflight: make(chan struct{}, 16)}
+	return &Server{logKey: []byte(id()), faults: map[string]*FaultRule{}, Engine: e, cfg: c, sessions: map[string]*session{}, instances: map[string]*instance{}, writes: map[string]*writeSession{}, storage: map[string]*storageSession{}, inflight: make(chan struct{}, c.MaxConcurrentRequests)}
 }
 func id() string {
 	var b [16]byte
@@ -126,24 +130,6 @@ func fail(w http.ResponseWriter, r *http.Request, status int, code string, e err
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	t := s.requestTrace(r)
 	r = withTrace(r, t)
-	if s.cfg.TestMode && t.Action != "" && (t.Plane == "storage" || t.Object == "upload" || t.Object == "upsert" || t.Object == "stream") {
-		active := s.activeWrites.Add(1)
-		for peak := s.peakWrites.Load(); active > peak; peak = s.peakWrites.Load() {
-			if s.peakWrites.CompareAndSwap(peak, active) {
-				break
-			}
-		}
-		defer s.activeWrites.Add(-1)
-	}
-	if s.cfg.TestMode && t.Action == "write" {
-		active := s.activeDataWrites.Add(1)
-		for peak := s.peakDataWrites.Load(); active > peak; peak = s.peakDataWrites.Load() {
-			if s.peakDataWrites.CompareAndSwap(peak, active) {
-				break
-			}
-		}
-		defer s.activeDataWrites.Add(-1)
-	}
 
 	sw := &statusWriter{ResponseWriter: w}
 	w = sw
@@ -178,9 +164,28 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer func() { <-s.inflight }()
 	default:
 		w.Header().Set("Retry-After", "1")
-		fail(w, r, 503, "ServiceUnavailable", fmt.Errorf("request capacity exceeded"))
+		fail(w, r, 429, "FlowExceeded", fmt.Errorf("concurrent request limit exceeded"))
 		return
 	}
+	if s.cfg.TestMode && t.Action != "" && (t.Plane == "storage" || t.Object == "upload" || t.Object == "upsert" || t.Object == "stream") {
+		active := s.activeWrites.Add(1)
+		for peak := s.peakWrites.Load(); active > peak; peak = s.peakWrites.Load() {
+			if s.peakWrites.CompareAndSwap(peak, active) {
+				break
+			}
+		}
+		defer s.activeWrites.Add(-1)
+	}
+	if s.cfg.TestMode && t.Action == "write" {
+		active := s.activeDataWrites.Add(1)
+		for peak := s.peakDataWrites.Load(); active > peak; peak = s.peakDataWrites.Load() {
+			if s.peakDataWrites.CompareAndSwap(peak, active) {
+				break
+			}
+		}
+		defer s.activeDataWrites.Add(-1)
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.QueryTimeout)
 	defer cancel()
 	r = r.WithContext(ctx)
