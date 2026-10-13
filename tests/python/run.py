@@ -482,10 +482,12 @@ def merge_target_exists_keeps_the_part():
     name = PREFIX + "_dupmerge.bin"
     code, body, kept = parts_after_refusal(name, hashlib.md5(BLOB[:CHUNK]).hexdigest(), CHUNK,
                                            precreate=True)
-    # What the case asserts is the part lifecycle, not the status code: the service answers
-    # this request with `ODPS-0421121 The resource has already existed` (its HTTP status was
-    # not read back here), the emulator answers 400 InvalidParameter. That difference is
-    # pre-existing and out of this change's scope; both refuse before reading a part.
+    # What the case asserts is the part lifecycle, not the status code: measured on the
+    # service (2026-10-02/10-03, PyODPS status_code read-back) the duplicate target answers
+    # 409 ObjectAlreadyExists + `ODPS-0421121 The resource has already existed`, while the
+    # emulator answers 400 ResourceAlreadyExists. That shape difference is pre-existing and
+    # tracked in README ("Known divergences from the real service"); both refuse before
+    # reading a part, which is what this case pins.
     eq(200 <= code < 300, False, "the merge over an existing target is refused (%s %s)" % (code, body[:60]))
     # Measured on the service: the refusal is decided before any part is read, so the part
     # survives and the client can re-point the merge at another name.
