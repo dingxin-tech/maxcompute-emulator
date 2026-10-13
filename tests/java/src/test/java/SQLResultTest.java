@@ -24,7 +24,7 @@ public class SQLResultTest {
     endpoint = System.getProperty("emulator.endpoint");
     if (endpoint == null) {
       container = new GenericContainer<>(
-          System.getProperty("emulator.image", "maxcompute/maxcompute-emulator:1.1.0"))
+          System.getProperty("emulator.image", "maxcompute/maxcompute-emulator:1.2.0"))
           .withExposedPorts(8080).waitingFor(Wait.forHttp("/readyz"));
       container.start();
       endpoint = "http://" + container.getHost() + ":" + container.getMappedPort(8080);

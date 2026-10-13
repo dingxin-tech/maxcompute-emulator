@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.2.0 — 2026-10-13
+
 - Add Storage v1 batch read sessions, row-range/projection validation and Arrow/V5 negotiation; unsupported physical/incremental planning remains explicit.
 - Preserve all Arrow timestamp units, nested timestamps and IPC ZSTD/LZ4_FRAME compression.
 - Add Unicode CHAR/VARCHAR schema and transfer contracts, transactional table rename and atomic multi-partition additions.

@@ -51,7 +51,7 @@ Tunnel Arrow 不是普通带 Schema 消息的 IPC stream：客户端从会话元
 
 ## 迁移
 
-1.0.0 在 CK 下载基础上增加 Tunnel 上传、Upsert、实例下载和 Storage API 读写，详情见 [数据传输](data-transfer.md)。开发候选版本的 Storage v1 批量读取范围见 [Connector 协议](connector-conformance.md)；Storage v1 写入/物理分片/增量读取、Volume/Blob 仍不支持。Go 实现在 main，旧实现保留于 legacy。需要旧功能的消费者可继续使用旧镜像；SQLite 与 DuckDB 文件不兼容，用 SQL fixture 重建数据，勿挂载同一数据库文件。
+1.0.0 在 CK 下载基础上增加 Tunnel 上传、Upsert、实例下载和 Storage API 读写，详情见 [数据传输](data-transfer.md)。1.2.0 的 Storage v1 批量读取范围见 [Connector 协议](connector-conformance.md)；Storage v1 写入/物理分片/增量读取、Volume/Blob 仍不支持。Go 实现在 main，旧实现保留于 legacy。需要旧功能的消费者可继续使用旧镜像；SQLite 与 DuckDB 文件不兼容，用 SQL fixture 重建数据，勿挂载同一数据库文件。
 
 
 ## 1.0.0 写入与 Storage 入口

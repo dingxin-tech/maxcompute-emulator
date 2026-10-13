@@ -29,7 +29,7 @@ public class UdfMetadataTest {
       container =
           new GenericContainer<>(
                   DockerImageName.parse(
-                      System.getProperty("emulator.image", "maxcompute/maxcompute-emulator:1.1.0")))
+                      System.getProperty("emulator.image", "maxcompute/maxcompute-emulator:1.2.0")))
               .withExposedPorts(8080)
               .waitingFor(Wait.forHttp("/readyz"));
       container.start();
