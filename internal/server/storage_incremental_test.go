@@ -347,6 +347,9 @@ func TestCapabilitiesDeclareIncrementalRead(t *testing.T) {
 			t.Fatalf("capabilities missing %s: %s", want, text)
 		}
 	}
+	if !strings.Contains(text, `get_latest_version`) {
+		t.Fatalf(`capabilities missing get_latest_version: %s`, text)
+	}
 	for _, gap := range []string{"incremental-timestamp-window", "incremental-txn-id", "filter-predicate-pushdown"} {
 		if !strings.Contains(text, gap) {
 			t.Fatalf("capabilities missing declared gap %s: %s", gap, text)

@@ -98,7 +98,7 @@ v1 Testcontainers 的模式保留，但就绪条件改为 HTTP `/readyz`，无�
 | 会话 | 默认 TTL 30 分钟；完成/过期后不可恢复；仅运行期间有效 |
 | Arrow 分页 | Tunnel 单响应一批；指定 raw_size 时最多65,536行且至少返回一行；不指定则返回请求范围；Storage 按 MaxBatchRows 输出多批 |
 | 资源/函数 | 资源上传（单次 payload 或 Java SDK 分片+合并）、元数据读取、按 `rOffset`/`rSize` 下载、覆盖、删除、前缀与分页列举；TABLE 资源元数据；引用已存在资源的 Java/SQL/内嵌函数注册 |
-| 增量读取 | ACID 表（主键 + `transactional` 或 format-version 2 属性）按版本区间 `(StartVersion, EndVersion]` 读取变更事件，支持 `append`/`cdc` 两种模式：cdc 读只追加的事件历史，append 读当前活行（同一窗口内先插入后被删除的行两边都不出现）；会话返回 `LatestVersion` 供消费者推进游标，事件带 `__meta_op_type`（tinyint：2 插入、4 删除、32 更新后像, 16 更新前像, 活行上是 8）与 `__meta_timestamp`；时间窗（`StartTimeStamp`/`EndTimeStamp`）与 `StartTxnId` 明确拒绝。op 取值与 `append` 模式对“先插入后删除”的呈现已在真实项目实测对齐; 未实测的是 8 与 32 的区分规则与并发写入下的事件顺序 |
+| 增量读取 | ACID 表（主键 + `transactional` 或 format-version 2 属性）按版本区间 `(StartVersion, EndVersion]` 读取变更事件，支持 `append`/`cdc` 两种模式：cdc 读只追加的事件历史，append 读当前活行（同一窗口内先插入后被删除的行两边都不出现）；会话返回 `LatestVersion` 供消费者推进游标，事件带 `__meta_op_type`（tinyint：2 插入、4 删除、32 更新后像, 16 更新前像, 活行上是 8）与 `__meta_timestamp`；时间窗（`StartTimeStamp`/`EndTimeStamp`）与 `StartTxnId` 明确拒绝。op 取值与 `append` 模式对“先插入后删除”的呈现已在真实项目实测对齐; 未实测的是 8 与 32 的区分规则与并发写入下的事件顺序。版本发现走 `SELECT get_latest_version(project[.schema].table)`，它回的数字与会话的 `LatestVersion` 同源 |
 | 不支持 | Storage v1 写入/物理分片、Volume/Blob、按时间窗或事务号续读的增量读取、过滤表达式下推、UDF 执行（函数只有元数据，SQL `CREATE FUNCTION`/`DROP FUNCTION` 与调用 UDF 返回 `UnsupportedFeature`）、Volume 资源、授权模拟、异步 SQL、完整 ODPS 函数库/隐式转换语义 |
 
 资源 payload 上限 64 MiB/个、512 MiB/project+schema；资源名与函数名按大小写不敏感解析，回读保留上传时的大小写。

@@ -478,6 +478,11 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		}
 		return none, err
 	case "select", "with":
+		// CDC consumers discover the readable version with this function; answering it here
+		// keeps the version they poll and the version a session reports on one code path.
+		if result, handled, err := latestVersionSelect(ctx, tx, ns, ts); handled {
+			return result, err
+		}
 		return e.query(ctx, tx, render(ts))
 	default:
 		return none, fmt.Errorf("UnsupportedFeature: %s", ts[0])

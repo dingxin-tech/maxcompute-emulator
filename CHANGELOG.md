@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Answer `SELECT get_latest_version('<project>[.<schema>].<table>')` in the SQL plane. It is
+  the poll a delta source makes before it plans a CDC window, so it now returns the same
+  number an incremental session reports as `LatestVersion` - including zero for an empty
+  ACID table, and the cutoff for a window that starts at the polled version and reads
+  nothing. A plain table and an unresolvable name are refused instead of answered with
+  zero, and `/capabilities` lists the function.
+
 - **Behavior change:** Storage v1 read sessions now accept `CrossPartition` instead of refusing it. The public table API (the surface the Flink/Spark connectors build on) defaults the flag to true, and every emulator read is answered with one logical split that already spans the selected partitions, so the refusal made the v1 batch and incremental paths unusable by a default-configured consumer without changing any observable result. Bucket splits, parallelism greater than one and bucket sort still fail explicitly.
 
 - Add Storage v1/v2 **incremental reads** over a version window for ACID tables: sessions created with `session_type=incremental_read` (v1) or `IncrementalRead=true` plus `IncrementalReadOptions` (v2) return the events published in `(StartVersion, EndVersion]`, echo `IncrementalReadOptions`, and publish `LatestVersion` so a consumer can store the version it reached and ask only for what follows. Every event carries the NOT NULL system columns `__meta_op_type` (`tinyint`) and `__meta_timestamp`; `cdc` includes update-before/delete images, `append` returns new content only.
