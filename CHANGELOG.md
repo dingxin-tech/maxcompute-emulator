@@ -7,7 +7,17 @@
 - Add Storage v1/v2 **incremental reads** over a version window for ACID tables: sessions created with `session_type=incremental_read` (v1) or `IncrementalRead=true` plus `IncrementalReadOptions` (v2) return the events published in `(StartVersion, EndVersion]`, echo `IncrementalReadOptions`, and publish `LatestVersion` so a consumer can store the version it reached and ask only for what follows. Every event carries the NOT NULL system columns `__meta_op_type` (`tinyint`) and `__meta_timestamp`; `cdc` includes update-before/delete images, `append` returns new content only.
 - Delta tables (primary key plus `transactional` or format-version 2) now keep row-level versions: each published row carries a sequence-stamped version, operation and commit time, and every write path - SQL `INSERT`, Tunnel upload, Storage batch/streaming/upsert commits, `INSERT OVERWRITE`, `TRUNCATE` and `ALTER TABLE DROP PARTITION` - appends its events to an append-only history, so a window still shows an insert that a later delete removed. The version columns are hidden from every projection and schema a user can see (`SELECT *` returns the declared columns).
 - Refuse the incremental forms that are not simulated, with the service's own status rather than an empty success: non-ACID tables, timestamp windows, `StartTxnId`, and filter predicates on an incremental window. `/capabilities` now declares `storage_incremental_read` and names each gap.
-- Document the unverified parts instead of implying coverage: the event-code values and `append` behaviour around rows deleted after being inserted are the emulator's contract, checked against the public Java SDK shapes but not compared cell-by-cell with the live service.
+- Aligned the incremental read shapes with a live project after measuring them:
+  append answers what is new from live rows, so a row inserted and then deleted
+  inside the same window appears in neither view, where before this it replayed the
+  insert; the CDC view publishes the after-image of a replacement as the services
+  update-after code while the live row keeps 8; LatestTxnId comes back as the empty
+  string the service returns. Per-row version advance, the data, system and
+  partition field order, and the ACID gate were confirmed rather than assumed.
+
+- Left open by that run and still documented as unverified rather than guessed: the
+  rule that separates the two update-after codes, event ordering across partitions or
+  under concurrent writers, and the timestamp-window form, which stays refused.
 
 - Document the two measured divergences from the live service in README - the status and error codes a refused chunked merge returns (`500`/`409` with `ODPS-0421213`/`ODPS-0421121` in the cloud, `400` here) and a `TABLE` resource that is created even when its table is missing (`404 NoSuchObject` in the cloud) - with what each measurement did and did not cover, and correct `docs/protocol.md`, which still said the service's HTTP status had not been read back and named `InvalidParameter` where the emulator answers `ResourceAlreadyExists`. No behavior changed.
 

@@ -37,7 +37,7 @@ func TestDeltaPartialUpsertKeepsUnmentionedColumns(t *testing.T) {
 	for _, row := range events.Rows {
 		kinds = append(kinds, eventOp(row, 2))
 	}
-	if len(kinds) != 2 || kinds[0] != 16 || kinds[1] != 8 {
+	if len(kinds) != 2 || kinds[0] != 16 || kinds[1] != 32 {
 		t.Fatalf("partial upsert events=%v want update-before then update-after", kinds)
 	}
 	if fmt.Sprint(events.Rows[0][1]) != "keep" || fmt.Sprint(events.Rows[1][1]) != "keep" {

@@ -62,6 +62,9 @@ it is not a published registry digest. Archive clean logs and source manifests w
 new runs. See [build](build.md) and [fault controls](reliability.md).
 
 Production IAM/quota/throughput, DLMV, cross-node recovery and physical split
-planning need separate real-service acceptance, and so does a cell-by-cell
-comparison of the simulated CDC event codes and `append` semantics. Transfer sessions and retry history
+planning need separate real-service acceptance. The CDC event codes, the shape of an `append` window, the version
+advance and the read-schema field order were measured against a live project on
+2026-10-14 and the emulator was aligned to what came back; what that run did not
+settle is the rule separating the two update-after codes, and event ordering under
+concurrent writers or across partitions. Transfer sessions and retry history
 remain process-local across Emulator restarts.

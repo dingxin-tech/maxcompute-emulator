@@ -308,6 +308,9 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 			// incremental reader cannot move its cursor at all.
 			resp["DataSchema"] = deltaSchema(v.Data.Columns, v.Meta.Partitions)
 			resp["LatestVersion"] = v.LatestVersion
+			// LatestTxnId is published as the empty string the live service returns, so a
+			// consumer that carries it straight back as StartTxnId sees the same shape either way.
+			resp["LatestTxnId"] = ""
 			resp["IncrementalReadOptions"] = map[string]any{"StartVersion": v.IncStart, "EndVersion": v.LatestVersion, "Mode": v.IncMode}
 		}
 		jsonResponse(w, 200, resp)

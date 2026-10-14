@@ -108,11 +108,11 @@ Offline SQL instance results (`?result`) also include the CSV column-name header
 MCQA sessions cover both of the Java SDK's read paths: the information channel (`SQLExecutor` with `useInstanceTunnel(false)`) answers with CSV whose first line is the column-name header, and the instance tunnel (`?data&cached&taskname=..&queryid=..`, the default fetch and the one JDBC MaxQA uses) answers with a record stream that carries its own schema, so a sub-query result arrives with the same rows and the same types either way. `instance_tunnel_limit_enabled` applies the service's `READ_TABLE_MAX_ROW` (10,000 rows) to that read, `rowrange` pages through it, and `sizelimit` shortens a response instead of failing it. Statements that produce no result set are refused on the tunnel with `InstanceTypeNotSupported`, like the service, so a client confirms them through the session API rather than reading an empty stream. A session is **select-only by default**: a `CREATE`/`INSERT`/`DROP` submitted as a sub query is declined before anything runs (`queryId: -1` plus `ODPS-1850001 Non select query not supported.`), because the Java client reacts to a non-select it learns about at fetch time by running the same statement offline again — and an INSERT that already ran in the session would land twice. Send `odps.sql.session.select.only=false`, in the session settings or per statement, to run them in the session anyway. Session-scoped state (variables, temp objects) is not isolated — statements run against the shared engine. Not simulated: named-session attach (a session name is metadata; equal names create separate sessions), MaxQA v2 (`/mcqa` request prefix), compressed or Arrow-encoded sub-query downloads (Protobuf records only), and per-statement statistics.
 Unsupported: Storage v1 write sessions, Volume/Blob, incremental reads over a timestamp window or resumed by transaction id, filter predicate pushdown, explicit Schema management, column schema evolution, UDF **execution** (functions are registered metadata; SQL `CREATE FUNCTION`/`DROP FUNCTION` and calling a UDF return `UnsupportedFeature`), volume-backed resources, distributed scheduling, and full ODPS SQL semantics.
 
-Incremental reads answer only for ACID tables (a primary key plus `transactional` or format-version 2 properties), refused the same way the service refuses them: `405`/`MethodNotAllowed` with `Only ACID table support incremental read`. A session pins the version the table had reached when it was created, returns the events published in `(StartVersion, EndVersion]` (an unset `EndVersion` means that pinned version) and reports it back as `LatestVersion`, so a reader that stores the version it reached can ask for what came next. Every event carries `__meta_op_type` (a NOT NULL `tinyint`: 2 insert, 4 delete, 8 update-after, 16 update-before) and `__meta_timestamp`; `cdc` returns both sides of a replacement, `append` returns new content only. The op codes and the `append` behaviour around a row that was inserted and later deleted are the emulator's own contract: they have been verified against the public SDK's schema and Arrow shapes, **not** compared cell-for-cell with the live service. A version column, an operation column and a commit timestamp are stored beside each row and stay out of every user-visible projection and schema; `LatestVersion` comes from the highest version in the event history, so it never moves backwards when the newest rows are removed. Timestamp windows (`StartTimeStamp`/`EndTimeStamp`), `StartTxnId`, filter predicates over an incremental window and physical bucket/parallelism split planning are refused explicitly and listed in `/capabilities`.
+Incremental reads answer only for ACID tables (a primary key plus `transactional` or format-version 2 properties), refused the same way the service refuses them: `405`/`MethodNotAllowed` with `Only ACID table support incremental read`. A session pins the version the table had reached when it was created, returns what falls inside `(StartVersion, EndVersion]` (an unset `EndVersion` means that pinned version) and reports it back as `LatestVersion`, so a reader that stores the version it reached can ask for what came next. `cdc` answers what happened and reads the event history; `append` answers what is new and reads live rows, so a row that was inserted and then deleted inside one window appears in neither. Every event carries the NOT NULL `tinyint` `__meta_op_type` and `__meta_timestamp`; the codes are 2 insert, 4 delete, 16 update-before and the after-image of a replacement, which the service publishes as 32 in the CDC view while the live row keeps 8 - consumers fold both into UPDATE_AFTER. Both shapes, the `data -> system -> partition` Arrow field order and the empty-string `LatestTxnId` were read off a live MaxCompute project on 2026-10-14; what was not compared is the rule that separates 8 from 32, event ordering across partitions or concurrent writers, and the timestamp-window form, which the emulator refuses instead of guessing. A version column, an operation column and a commit timestamp are stored beside each row and stay out of every user-visible projection and schema; `LatestVersion` comes from the highest version in the event history, so it never moves backwards when the newest rows are removed. Timestamp windows (`StartTimeStamp`/`EndTimeStamp`), `StartTxnId`, filter predicates over an incremental window and physical bucket/parallelism split planning are refused explicitly and listed in `/capabilities`.
 
 Resource payloads are capped at 64 MiB each and 512 MiB per project/schema. Resource and function names resolve case-insensitively while the uploaded spelling is what listings return. Unsupported operations return errors rather than cloud behavior being assumed.
 
-Three measured differences from the service - the codes a refused chunked merge returns, a `TABLE` resource accepted for a table that does not exist, and the split in rejection codes (`405` for the incremental refusals above, `400 UnsupportedOperation` for refusals that predate them) - are listed in [Known divergences from the real service](#known-divergences-from-the-real-service).
+Four documented differences from the service - the codes a refused chunked merge returns, a `TABLE` resource accepted for a table that does not exist, the extra property a live CDC table demands before it takes an insert, and the split in rejection codes (`405` for the incremental refusals above, `400 UnsupportedOperation` for refusals that predate them) - are listed in [Known divergences from the real service](#known-divergences-from-the-real-service).
 
 Flink 1.16.2 standalone bounded uploads were tested with Protobuf/Arrow and ordinary/dynamic-partition tables. Use `sink.standalone.enable=true`. A coordinator-mode bounded input in the tested connector can finish without committing rows; that mode is not certified. Checkpoint recovery and cross-job exactly-once have not been validated.
 
@@ -120,8 +120,8 @@ ClickHouse-facing Tunnel behavior is covered by protocol and Java SDK tests. A c
 
 ## Known divergences from the real service
 
-Two differences against a live MaxCompute project were **measured on the wire**, not inferred, and they
-stay as they are on purpose: the codes below are what this repository's own tests assert on, so changing
+The first three rows below were **measured on the wire** against a live MaxCompute project, not inferred, and they
+stay as they are on purpose: the codes in those rows are what this repository's own tests assert on, so changing
 one is a contract decision, not a documentation fix. Until that decision is taken, this section is the
 tracking list — if your measurement contradicts a row, open an issue with both readings and a request id.
 
@@ -187,6 +187,31 @@ non-empty `x-odps-copy-table-source` and does validate the *resources* a functio
 behind a `TABLE` resource is the one pointer it does not resolve. Create the table in the seed, or assert
 `odps.exist_table(...)` / `odps.tables().exists(...)` in the fixture setup, so a broken reference fails
 locally for the reason it would fail remotely.
+
+### 3. A CDC-enabled table needs one more property before it takes an insert
+
+Measured on the wire (2026-10-14) on a throwaway partitioned ACID table declared with
+transactional, acid.cdc.mode.enable and write.bucket.num: the live service refuses a plain
+INSERT INTO there with ODPS-0130071, asking for cdc.insert.into.passthrough.enable=true,
+while the emulator accepts the insert. An incremental read window over the same table is
+served by both, and the service matched the shapes documented above - the CDC event codes
+(2 insert, 4 delete, 16 update-before, 32 as the after-image of a replacement while the
+live row keeps 8), append answering from live rows so a row inserted and deleted inside
+one window is in neither view, LatestVersion advancing per row, data columns then system
+columns then partition columns, and LatestTxnId coming back as an empty string.
+
+Those readings cover one live project, one partitioned ACID table, and one INSERT / UPDATE / DELETE
+each, taken through the public table API. They do not derive the rule that separates the 8 and 32
+after-image codes, do not cover event ordering across partitions or under concurrent writers, and do
+not exercise the timestamp-window form, which this emulator refuses rather than guesses at.
+
+### 4. Two rejection shapes for operations we do not simulate
+
+The refusals added with incremental reads answer 405 MethodNotAllowed, the status the
+service uses when an operation does not apply to a table. Refusals that shipped in 1.2.0
+answer 400 UnsupportedOperation. Unifying them changes a published contract that existing
+tests assert on, so both shapes stay until that decision is taken; this row is the note
+that keeps the difference visible.
 
 ### What these readings do not cover
 

@@ -25,6 +25,7 @@ const (
 	deltaOpInsert = 2
 	deltaOpDelete = 4
 	deltaOpAfter  = 8
+	deltaOpCdc    = 32
 	deltaOpBefore = 16
 
 	deltaLSNALIAS = "_dlsn"
@@ -266,20 +267,23 @@ func (e *Engine) DeltaRead(ctx context.Context, p, s, name string, partitions []
 		return Result{}, 0, err
 	}
 	names := quoteNames(storedColumns(t))
-	// The event log is the history; live rows are only its current projection. Reading
-	// the log is what keeps an insert visible after a later delete removed the row.
+	// Two different questions, two different sources, both measured against the live
+	// service on 2026-10-14: cdc answers what happened from the append-only event
+	// history, while append answers what is new from live rows -- so a row that was
+	// inserted and later deleted inside the window appears in neither.
+	src := Quote(t.Name)
+	cdcCodes := false
+	if events {
+		src = Quote(t.DeltaLog())
+		cdcCodes = true
+	}
 	head := "SELECT " + strings.Join(names, ",") + ", " + Quote(DeltaLSNColumn) + " " + deltaLSNALIAS +
 		", " + Quote(DeltaOpColumn) + " " + deltaOpALIAS + ", " + Quote(DeltaTSColumn) + " " + deltaTSALIAS +
-		" FROM " + Quote(t.DeltaLog()) + " WHERE "
+		" FROM " + src + " WHERE "
 	if where != "" {
 		head += "(" + where + ") AND "
 	}
 	head += Quote(DeltaLSNColumn) + " > ? AND " + Quote(DeltaLSNColumn) + " <= ?"
-	if !events {
-		// Append mode consumes new content only, never the images of rows it replaced.
-		head += " AND " + Quote(DeltaOpColumn) + " NOT IN (" + strconv.Itoa(deltaOpDelete) +
-			"," + strconv.Itoa(deltaOpBefore) + ")"
-	}
 	args := append(append([]any{}, partArgs...), start, end)
 	outer := []string{}
 	for _, c := range t.Columns {
@@ -295,6 +299,16 @@ func (e *Engine) DeltaRead(ctx context.Context, p, s, name string, partitions []
 	r, err := e.query(ctx, tx, q, args...)
 	if err != nil {
 		return Result{}, 0, err
+	}
+	if cdcCodes {
+		// The service reports a replaced row as 32 in the CDC view while the live row
+		// keeps 8; consumers fold both into UPDATE_AFTER either way.
+		op := len(t.Columns)
+		for _, row := range r.Rows {
+			if v, ok := row[op].(int8); ok && v == deltaOpAfter {
+				row[op] = int8(deltaOpCdc)
+			}
+		}
 	}
 	r.Columns = deltaColumns(t)
 	for _, row := range r.Rows {

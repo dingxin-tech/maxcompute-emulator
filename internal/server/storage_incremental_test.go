@@ -311,7 +311,7 @@ func TestStorageV1IncrementalCDCImages(t *testing.T) {
 		t.Fatalf("cdc events=%v want insert + before + after", cdc["RecordCount"])
 	}
 	_, ops := readEvents(t, h, "acidcdc", sid)
-	want := []int64{2, 16, 8}
+	want := []int64{2, 16, 32}
 	if len(ops) != len(want) {
 		t.Fatalf("cdc ops=%v want %v", ops, want)
 	}
@@ -322,8 +322,8 @@ func TestStorageV1IncrementalCDCImages(t *testing.T) {
 	}
 	_, appendOut, appendSID := openSession(t, h, v1Path("acidcdc", "/sessions?session_type=incremental_read"),
 		`{"IncrementalReadOptions":{"StartVersion":0,"EndVersion":-1,"Mode":"append"}}`)
-	if count, _ := appendOut["RecordCount"].(float64); count != 2 {
-		t.Fatalf("append events=%v want the two live versions", appendOut["RecordCount"])
+	if count, _ := appendOut["RecordCount"].(float64); count != 1 {
+		t.Fatalf("append events=%v want the single live row (append reads live rows)", appendOut["RecordCount"])
 	}
 	_, appendOps := readEvents(t, h, "acidcdc", appendSID)
 	for _, op := range appendOps {

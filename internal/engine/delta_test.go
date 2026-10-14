@@ -92,7 +92,7 @@ func TestDeltaVersionsStampEveryWritePath(t *testing.T) {
 	for _, row := range updated.Rows {
 		ops = append(ops, eventOp(row, n))
 	}
-	want := []int64{2, 2, 2, 16, 8}
+	want := []int64{2, 2, 2, 16, 32} // measured: 32 is the service CDC form of update-after
 	if len(ops) != len(want) {
 		t.Fatalf("cdc events=%v want %v", ops, want)
 	}
