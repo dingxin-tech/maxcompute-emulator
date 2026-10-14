@@ -253,7 +253,7 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 			if req.SplitOptions.SplitMode != "" {
 				v.SplitMode = req.SplitOptions.SplitMode
 			}
-			if v.SplitMode == "Bucket" || (v.SplitMode == "Parallelism" && req.SplitOptions.SplitNumber != 1) || (strings.HasPrefix(r.URL.Path, "/api/storage/v1/") && req.SplitOptions.CrossPartition) || req.SplitOptions.BucketSort {
+			if v.SplitMode == "Bucket" || (v.SplitMode == "Parallelism" && req.SplitOptions.SplitNumber != 1) || req.SplitOptions.BucketSort {
 				bad(400, "UnsupportedOperation", fmt.Errorf("requested split planning is not implemented"))
 				return
 			}

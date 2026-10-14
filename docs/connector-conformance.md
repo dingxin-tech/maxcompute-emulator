@@ -14,8 +14,10 @@ projection, and batch sizes from 1 to 20000. Arrow timestamps retain second,
 millisecond, microsecond or nanosecond units, including nested values. ZSTD and
 LZ4_FRAME use Arrow IPC buffer compression.
 
-Physical bucket/parallelism splitting, cross-partition v1 planning and v1 write
-sessions remain unsupported and fail explicitly. Incremental reads are supported on
+Physical bucket/parallelism splitting, bucket sort and v1 write sessions remain
+unsupported and fail explicitly. The `CrossPartition` flag is accepted on both
+surfaces, because every read is answered with one logical split that already spans
+the selected partitions. Incremental reads are supported on
 ACID tables over a version window (`append` and `cdc`, with `__meta_op_type`/
 `__meta_timestamp` events and `LatestVersion`), while timestamp windows and
 transaction-id resume fail with the service's `405 MethodNotAllowed`. A single logical

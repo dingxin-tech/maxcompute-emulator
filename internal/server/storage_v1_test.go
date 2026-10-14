@@ -122,9 +122,11 @@ func TestStorageV1ReadColumnOrder(t *testing.T) {
 	}
 }
 
-// Storage v2's public SDK enables CrossPartition by default. Its single logical
-// snapshot already combines the selected partitions; v1 physical cross-partition
-// planning remains unsupported and must not silently pass through the adapter.
+// The public SDK enables CrossPartition by default on both surfaces, and the
+// emulator answers every read with one logical split that already spans the
+// selected partitions. The flag therefore has no physical meaning here and is
+// accepted rather than refused; the refusals that do change semantics (bucket,
+// parallelism, bucket sort) stay pinned below.
 func TestStorageReadPlanningProtocolBoundary(t *testing.T) {
 	_, h := fixture(t, Config{})
 	body := `{"SplitOptions":{"SplitMode":"Size","SplitNumber":268435456,"CrossPartition":true}}`
@@ -133,7 +135,7 @@ func TestStorageReadPlanningProtocolBoundary(t *testing.T) {
 		status int
 	}{
 		{"/api/storage/v3?Action=TableCreateReadSession&Target=projects.p.schemas.default.tables.t", 200},
-		{"/api/storage/v1/projects/p/schemas/default/tables/t/sessions?session_type=batch_read", 400},
+		{"/api/storage/v1/projects/p/schemas/default/tables/t/sessions?session_type=batch_read", 200},
 	} {
 		resp, err := h.Client().Post(h.URL+tc.path, "application/json", bytes.NewBufferString(body))
 		if err != nil {

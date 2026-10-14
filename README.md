@@ -267,8 +267,10 @@ row-offset ranges and resume within the selected range. Format/version negotiati
 case-insensitive. Unsupported codecs and malformed parameters fail explicitly.
 
 Local snapshots currently use one physical split. Bucket splits, parallelism greater
-than one, cross-partition split planning and zero batch size are not implemented;
-requests for those capabilities return `UnsupportedOperation`. These limitations must
+than one and zero batch size are not implemented; requests for those capabilities
+return `UnsupportedOperation`. The `CrossPartition` flag is accepted on both surfaces:
+the public table API defaults it to true, and one logical split already spans the
+selected partitions, so refusing it would only block table-api consumers. These limitations must
 not be treated as validation of equivalent distributed-service behavior. Independent
 wire tests inspect IPC compression metadata and timestamp values; consumer round trips
 alone are not sufficient protocol evidence.
