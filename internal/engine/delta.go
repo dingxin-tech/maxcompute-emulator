@@ -332,10 +332,15 @@ func (t Table) StoredWidth() int { return len(storedColumns(t)) }
 func (t Table) DeltaColumnNames() []string { return quoteNames(storedColumns(t)) }
 
 // MergePartial keeps the stored value for every column an update did not mention.
-func MergePartial(row, old []any, indices []int) []any {
+// The request carries the mentioned columns only; the rest must survive the write.
+func MergePartial(row, old []any, provided []int, dataColumns int) []any {
+	keep := map[int]bool{}
+	for _, i := range provided {
+		keep[i] = true
+	}
 	out := append([]any{}, row...)
-	for _, i := range indices {
-		if i >= 0 && i < len(out) && i < len(old) {
+	for i := 0; i < dataColumns && i < len(out) && i < len(old); i++ {
+		if !keep[i] {
 			out[i] = old[i]
 		}
 	}

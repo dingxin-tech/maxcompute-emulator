@@ -147,7 +147,7 @@ func (e *Engine) WriteMutationsExpected(ctx context.Context, p, s, name, expecte
 				if partial != nil && i < len(partial) && len(partial[i]) > 0 {
 					// An unmentioned column keeps its stored value, so the after-image is
 					// the merged row rather than the sparse request.
-					row = MergePartial(row, old, partial[i])
+					row = MergePartial(row, old, partial[i], len(t.Columns))
 				}
 			} else {
 				if partial != nil && i < len(partial) && len(partial[i]) > 0 && ops[i] == 'U' {
