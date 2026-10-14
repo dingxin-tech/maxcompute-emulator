@@ -23,14 +23,14 @@ func (s *Server) storageV1(w http.ResponseWriter, r *http.Request) {
 	action := ""
 	switch {
 	case len(parts) == 7 && parts[6] == "sessions" && r.Method == "POST":
-		if q.Get("session_type") != "batch_read" {
-			fail(w, r, 400, "UnsupportedOperation", fmt.Errorf("unsupported session type"))
+		if q.Get("session_type") != "batch_read" && q.Get("session_type") != "incremental_read" {
+			fail(w, r, 400, "InvalidParameter", fmt.Errorf("invalid session type"))
 			return
 		}
 		action = "TableCreateReadSession"
 	case len(parts) == 8 && parts[6] == "sessions" && r.Method == "GET":
-		if q.Get("session_type") != "batch_read" {
-			fail(w, r, 400, "UnsupportedOperation", fmt.Errorf("unsupported session type"))
+		if q.Get("session_type") != "batch_read" && q.Get("session_type") != "incremental_read" {
+			fail(w, r, 400, "InvalidParameter", fmt.Errorf("invalid session type"))
 			return
 		}
 		action = "TableGetReadSession"
@@ -179,7 +179,11 @@ func (s *Server) storageV1(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, 500, "InvalidData", err)
 		return
 	}
-	result["SessionType"] = "batch_read"
+	if q.Get("session_type") == "incremental_read" {
+		result["SessionType"] = "incremental_read"
+	} else {
+		result["SessionType"] = "batch_read"
+	}
 	result["SessionStats"] = map[string]any{"EstimatedSize": -1, "EstimatedRowCount": result["RecordCount"]}
 	jsonResponse(w, http.StatusOK, result)
 }

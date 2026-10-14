@@ -38,3 +38,29 @@ func storageType(name string, t engine.Type, nullable bool, n *int) map[string]a
 	out["SubTypes"] = children
 	return out
 }
+
+// deltaSchema publishes the three buckets an incremental session reads back in the
+// order consumers concatenate them: data columns, system columns, partition columns.
+func deltaSchema(cols []engine.Column, partitions []engine.Column) map[string]any {
+	names := map[string]bool{}
+	for _, c := range partitions {
+		names[c.Name] = true
+	}
+	data, system, part := []any{}, []any{}, []any{}
+	id := 0
+	add := func(bucket *[]any, c engine.Column) {
+		*bucket = append(*bucket, map[string]any{"Name": c.Name, "Type": c.Type, "Nullable": c.Nullable, "ColumnId": id, "Comment": c.Comment})
+		id++
+	}
+	for _, c := range cols {
+		switch {
+		case c.Name == engine.MetaOpColumn || c.Name == engine.MetaTSColumn:
+			add(&system, c)
+		case names[c.Name]:
+			add(&part, c)
+		default:
+			add(&data, c)
+		}
+	}
+	return map[string]any{"DataColumns": data, "PartitionColumns": part, "SystemColumns": system, "BlobColumns": []any{}}
+}

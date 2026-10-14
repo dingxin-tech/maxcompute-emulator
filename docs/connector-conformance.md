@@ -14,8 +14,11 @@ projection, and batch sizes from 1 to 20000. Arrow timestamps retain second,
 millisecond, microsecond or nanosecond units, including nested values. ZSTD and
 LZ4_FRAME use Arrow IPC buffer compression.
 
-Physical bucket/parallelism splitting, cross-partition v1 planning, v1 writes and
-incremental/CDC reads remain unsupported and fail explicitly. A single logical
+Physical bucket/parallelism splitting, cross-partition v1 planning and v1 write
+sessions remain unsupported and fail explicitly. Incremental reads are supported on
+ACID tables over a version window (`append` and `cdc`, with `__meta_op_type`/
+`__meta_timestamp` events and `LatestVersion`), while timestamp windows and
+transaction-id resume fail with the service's `405 MethodNotAllowed`. A single logical
 snapshot does not model physical service splits or distributed scheduling.
 
 ## Schema and metadata
@@ -56,6 +59,7 @@ These results used local image
 it is not a published registry digest. Archive clean logs and source manifests with
 new runs. See [build](build.md) and [fault controls](reliability.md).
 
-Production IAM/quota/throughput, CDC/DLMV, cross-node recovery and physical split
-planning need separate real-service acceptance. Transfer sessions and retry history
+Production IAM/quota/throughput, DLMV, cross-node recovery and physical split
+planning need separate real-service acceptance, and so does a cell-by-cell
+comparison of the simulated CDC event codes and `append` semantics. Transfer sessions and retry history
 remain process-local across Emulator restarts.

@@ -1,6 +1,6 @@
 # 数据传输与 SDK 验收
 
-1.0.0 的范围是表与 SQL 实例的数据传输。生产鉴权、云端存储调度、Volume、Blob 和 CDC 不在此版本中；不支持的 Action/增量或过滤读取返回错误。
+1.0.0 的范围是表与 SQL 实例的数据传输。生产鉴权、云端存储调度、Volume 与 Blob 不在此版本中；不支持的 Action 或过滤读取返回错误。ACID 表（主键 + `transactional`/format-version 2）支持按版本区间 `(StartVersion, EndVersion]` 的增量读取（`append`/`cdc`），事件列 `__meta_op_type`/`__meta_timestamp` 与 `LatestVersion` 一同返回；时间窗与事务号续读、非 ACID 表返回明确错误（405）。
 
 ## 支持矩阵
 
