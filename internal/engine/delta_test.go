@@ -262,3 +262,32 @@ func TestDeltaPartitionedWindowReadsSelectedPartitions(t *testing.T) {
 		t.Fatalf("bound=%d", bound)
 	}
 }
+
+// TestDeltaTableDropsAndCanBeRecreated pins the dependency order: the table column
+// default references the version sequence, so dropping the sequence first leaves the
+// table undroppable, and a recreated table must get its own version counter.
+func TestDeltaTableDropsAndCanBeRecreated(t *testing.T) {
+	ctx := context.Background()
+	e := openTestEngine(t)
+	ddl := "create table dup(id bigint, s string, primary key(id)) tblproperties('transactional'='true')"
+	if _, err := e.Execute(ctx, "p", "default", ddl); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Execute(ctx, "p", "default", "insert into dup values (1,'a')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Execute(ctx, "p", "default", "drop table dup"); err != nil {
+		t.Fatalf("dropping a delta table: %v", err)
+	}
+	if _, err := e.Execute(ctx, "p", "default", ddl); err != nil {
+		t.Fatalf("recreating after a drop: %v", err)
+	}
+	if _, err := e.Execute(ctx, "p", "default", "insert into dup values (2,'b')"); err != nil {
+		t.Fatal(err)
+	}
+	// A fresh table starts its own versions at 1, so the window sees exactly one row.
+	rows, version, err := e.DeltaRead(ctx, "p", "default", "dup", nil, 0, -1, true)
+	if err != nil || version != 1 || len(rows.Rows) != 1 {
+		t.Fatalf("after recreate: version=%d rows=%d err=%v", version, len(rows.Rows), err)
+	}
+}

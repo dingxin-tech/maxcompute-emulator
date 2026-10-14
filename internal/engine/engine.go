@@ -311,13 +311,15 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		if err != nil || end != len(ts) {
 			return none, fmt.Errorf("invalid DROP")
 		}
+		// A delta table column default references the version sequence, so the table has
+		// to go first: dropping the sequence while a dependent object remains fails.
+		if _, err = tx.ExecContext(ctx, "DROP TABLE IF EXISTS "+Quote(name)); err != nil {
+			return none, err
+		}
 		if old, e := load(ctx, tx, ns, name); e == nil && old.IsDelta() {
 			if err = dropDeltaObjects(ctx, tx, old); err != nil {
 				return none, err
 			}
-		}
-		if _, err = tx.ExecContext(ctx, "DROP TABLE IF EXISTS "+Quote(name)); err != nil {
-			return none, err
 		}
 		_, err = tx.ExecContext(ctx, "DELETE FROM main.emulator_catalog WHERE namespace=? AND name=?", ns, name)
 		return none, err
