@@ -278,14 +278,22 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 			}
 			defs = append(defs, def)
 		}
-		if _, err = tx.ExecContext(ctx, "CREATE TABLE "+Quote(name)+" ("+strings.Join(defs, ",")+")"); err != nil {
-			return none, err
-		}
 		tableID, err := newTableID()
 		if err != nil {
 			return none, err
 		}
-		b, _ := json.Marshal(Table{ID: tableID, Name: name, Columns: cols, Partitions: parts, PrimaryKeys: primaryKeys, Properties: props, Created: time.Now().Unix()})
+		created := Table{ID: tableID, Name: name, Columns: cols, Partitions: parts, PrimaryKeys: primaryKeys, Properties: props, Created: time.Now().Unix()}
+		if created.IsDelta() {
+			// The sequence has to exist before the table's DEFAULT can reference it.
+			if err = createDeltaObjects(ctx, tx, created, append([]string{}, defs...)); err != nil {
+				return none, err
+			}
+			defs = append(defs, created.deltaDefinitions()...)
+		}
+		if _, err = tx.ExecContext(ctx, "CREATE TABLE "+Quote(name)+" ("+strings.Join(defs, ",")+")"); err != nil {
+			return none, err
+		}
+		b, _ := json.Marshal(created)
 		_, err = tx.ExecContext(ctx, "INSERT INTO main.emulator_catalog VALUES(?,?,?)", ns, name, string(b))
 		return none, err
 	case "drop":
@@ -303,8 +311,15 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		if err != nil || end != len(ts) {
 			return none, fmt.Errorf("invalid DROP")
 		}
+		// A delta table column default references the version sequence, so the table has
+		// to go first: dropping the sequence while a dependent object remains fails.
 		if _, err = tx.ExecContext(ctx, "DROP TABLE IF EXISTS "+Quote(name)); err != nil {
 			return none, err
+		}
+		if old, e := load(ctx, tx, ns, name); e == nil && old.IsDelta() {
+			if err = dropDeltaObjects(ctx, tx, old); err != nil {
+				return none, err
+			}
 		}
 		_, err = tx.ExecContext(ctx, "DELETE FROM main.emulator_catalog WHERE namespace=? AND name=?", ns, name)
 		return none, err
@@ -323,6 +338,11 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		table.EmptyPartitions, err = partitionList(ctx, tx, table)
 		if err != nil {
 			return none, err
+		}
+		if table.IsDelta() {
+			if err = logDeltaRemovedRows(ctx, tx, table, "", nil, deltaOpDelete); err != nil {
+				return none, err
+			}
 		}
 		if _, err = tx.ExecContext(ctx, "DELETE FROM "+Quote(name)); err != nil {
 			return none, err
@@ -394,6 +414,11 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 			if len(where) > 0 {
 				q += " WHERE " + strings.Join(where, " AND ")
 			}
+			if table.IsDelta() {
+				if err = logDeltaRemovedRows(ctx, tx, table, strings.Join(where, " AND "), args, deltaOpDelete); err != nil {
+					return none, err
+				}
+			}
 			if _, err = tx.ExecContext(ctx, q, args...); err != nil {
 				return none, err
 			}
@@ -405,7 +430,7 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 				boundedStrings = true
 			}
 		}
-		if boundedStrings {
+		if boundedStrings || table.IsDelta() {
 			stageRows, er := tx.QueryContext(ctx, "SELECT * FROM __emulator_stage LIMIT 0")
 			if er != nil {
 				return none, er
@@ -420,21 +445,46 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 			}
 			expressions := []string{}
 			for i, c := range table.Columns {
-				expressions = append(expressions, c.Parsed.StringExpression(Quote(names[i])))
+				if boundedStrings {
+					expressions = append(expressions, c.Parsed.StringExpression(Quote(names[i])))
+					continue
+				}
+				expressions = append(expressions, Quote(names[i]))
 			}
 			projection = strings.Join(expressions, ",")
 		}
-		q := "INSERT INTO " + Quote(name) + " SELECT " + projection
+		q := "INSERT INTO " + Quote(name)
+		if table.IsDelta() {
+			// A delta table carries hidden version columns with defaults, so the
+			// target column list has to be explicit for those defaults to apply.
+			list := []string{}
+			for _, c := range table.Columns {
+				list = append(list, Quote(c.Name))
+			}
+			for _, c := range table.Partitions {
+				list = append(list, Quote(c.Name))
+			}
+			q += " (" + strings.Join(list, ",") + ")"
+		}
+		q += " SELECT " + projection
 		if len(extra) > 0 {
 			q += "," + strings.Join(extra, ",")
 		}
 		q += " FROM __emulator_stage"
 		_, err = tx.ExecContext(ctx, q, args...)
+		if err == nil && table.IsDelta() {
+			err = logDeltaNewRows(ctx, tx, table)
+		}
 		if err == nil {
 			err = saveTable(ctx, tx, ns, table)
 		}
 		return none, err
 	case "select", "with":
+		// CDC consumers discover the readable version with this function; answering it here
+		// keeps the version they poll and the version a session reports on one code path.
+		if result, handled, err := latestVersionSelect(ctx, tx, ns, ts); handled {
+			return result, err
+		}
 		return e.query(ctx, tx, render(ts))
 	default:
 		return none, fmt.Errorf("UnsupportedFeature: %s", ts[0])
@@ -451,7 +501,13 @@ func (e *Engine) query(ctx context.Context, tx *sql.Tx, q string, args ...any) (
 		return Result{}, err
 	}
 	r := Result{Rows: [][]any{}}
-	for _, c := range cts {
+	keep := []int{}
+	for i, c := range cts {
+		// Delta tables carry hidden version columns; a star projection must not leak them.
+		if IsHiddenColumn(c.Name()) {
+			continue
+		}
+		keep = append(keep, i)
 		typ := strings.ToLower(c.DatabaseTypeName())
 		switch typ {
 		case "varchar":
@@ -469,6 +525,7 @@ func (e *Engine) query(ctx context.Context, tx *sql.Tx, q string, args ...any) (
 		}
 		r.Columns = append(r.Columns, col)
 	}
+	hidden := len(keep) < len(cts)
 	for rows.Next() {
 		if len(r.Rows) >= e.maxRows {
 			return Result{}, fmt.Errorf("ResourceLimit: row limit %d", e.maxRows)
@@ -480,6 +537,13 @@ func (e *Engine) query(ctx context.Context, tx *sql.Tx, q string, args ...any) (
 		}
 		if err = rows.Scan(ptr...); err != nil {
 			return Result{}, err
+		}
+		if hidden {
+			out := make([]any, 0, len(keep))
+			for _, i := range keep {
+				out = append(out, v[i])
+			}
+			v = out
 		}
 		for i := range v {
 			var size int64
