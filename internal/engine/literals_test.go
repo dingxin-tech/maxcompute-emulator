@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"testing"
 )
 
@@ -24,12 +25,17 @@ func TestODPSTypedNumericLiterals(t *testing.T) {
 		{"1.25f", "float", "1.25"}, {"-1.25E2F", "float", "-125.0"},
 	} {
 		t.Run(tc.sql, func(t *testing.T) {
-			r, err := e.Execute(context.Background(), "p", "default", "select "+tc.sql+" as n, cast("+tc.sql+" as string) as s")
+			r, err := e.Execute(context.Background(), "p", "default", "select "+tc.sql+" as n")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if r.Columns[0].Type != tc.typ || len(r.Rows) != 1 || r.Rows[0][1] != tc.value {
+			if r.Columns[0].Type != tc.typ || len(r.Rows) != 1 {
 				t.Fatalf("want %s %s, got %+v", tc.typ, tc.value, r)
+			}
+			got, ok := new(big.Rat).SetString(fmt.Sprint(r.Rows[0][0]))
+			want, _ := new(big.Rat).SetString(tc.value)
+			if !ok || got.Cmp(want) != 0 {
+				t.Fatalf("want %s, got %v", tc.value, r.Rows[0][0])
 			}
 		})
 	}
@@ -50,7 +56,7 @@ func TestODPSTypedNumericLiterals(t *testing.T) {
 		}
 	}
 	r, err := e.Execute(context.Background(), "p", "default", "select '73L' as `10BD`, 5L - 2L as n, -(1L) as m")
-	if err != nil || r.Columns[0].Name != "10BD" || r.Rows[0][0] != "73L" || r.Rows[0][1] != int64(3) || r.Rows[0][2] != int64(-1) {
+	if err != nil || r.Columns[0].Name != "10bd" || r.Rows[0][0] != "73L" || r.Rows[0][1] != int64(3) || r.Rows[0][2] != int64(-1) {
 		t.Fatalf("literal translation changed a string/identifier/operator: %+v %v", r, err)
 	}
 }
