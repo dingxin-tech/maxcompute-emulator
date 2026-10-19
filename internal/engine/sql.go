@@ -66,6 +66,17 @@ func render(ts []string) string {
 	r := []string{}
 	for i := 0; i < len(ts); i++ {
 		s := ts[i]
+		if (s == "-" || s == "+") && i+1 < len(ts) && unaryPosition(ts, i) {
+			if literal, ok := typedLiteral(s + ts[i+1]); ok {
+				r = append(r, literal)
+				i++
+				continue
+			}
+		}
+		if literal, ok := typedLiteral(s); ok {
+			r = append(r, literal)
+			continue
+		}
 		if word(s) == "map" && i+1 < len(ts) && ts[i+1] == "(" {
 			end, depth := i+2, 1
 			for end < len(ts) && depth > 0 {

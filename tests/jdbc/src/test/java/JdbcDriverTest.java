@@ -58,6 +58,30 @@ public class JdbcDriverTest {
     return prefix + "_" + (System.nanoTime() % 100000000L);
   }
 
+  @Test
+  void preparedNumericParametersPreserveTheirTypesAndBounds() throws Exception {
+    try (Connection c = DriverManager.getConnection(url());
+        PreparedStatement p = c.prepareStatement("select ? as y, ? as s, ? as n, ? as d, ? as f")) {
+      p.setByte(1, Byte.MIN_VALUE);
+      p.setShort(2, Short.MAX_VALUE);
+      p.setLong(3, Long.MIN_VALUE);
+      p.setBigDecimal(4, new java.math.BigDecimal("123.450"));
+      p.setFloat(5, 1.25f);
+      try (ResultSet r = p.executeQuery()) {
+        assertTrue(r.next());
+        assertEquals(Byte.MIN_VALUE, r.getByte(1));
+        assertEquals(Short.MAX_VALUE, r.getShort(2));
+        assertEquals(Long.MIN_VALUE, r.getLong(3));
+        assertEquals(0, new java.math.BigDecimal("123.450").compareTo(r.getBigDecimal(4)));
+        assertEquals(1.25f, r.getFloat(5));
+        assertEquals(Types.TINYINT, r.getMetaData().getColumnType(1));
+        assertEquals(Types.SMALLINT, r.getMetaData().getColumnType(2));
+        assertEquals(Types.BIGINT, r.getMetaData().getColumnType(3));
+        assertFalse(r.next());
+      }
+    }
+  }
+
   /**
    * The regression this whole file exists for: a statement with no result set. The driver
    * runs it, asks the frontend to sign a bearer token for the logview URL, and then opens a

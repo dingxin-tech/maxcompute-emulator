@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Execute JDBC typed numeric literals (`L`, `Y`, `S`, `BD`, `F`) with their declared types, decimal precision and range checks, including signed minimum integers. Add engine and published-driver regressions; strings and quoted identifiers remain unchanged.
+
 - Document the two measured divergences from the live service in README - the status and error codes a refused chunked merge returns (`500`/`409` with `ODPS-0421213`/`ODPS-0421121` in the cloud, `400` here) and a `TABLE` resource that is created even when its table is missing (`404 NoSuchObject` in the cloud) - with what each measurement did and did not cover, and correct `docs/protocol.md`, which still said the service's HTTP status had not been read back and named `InvalidParameter` where the emulator answers `ResourceAlreadyExists`. No behavior changed.
 
 ## 1.2.0 — 2026-10-13

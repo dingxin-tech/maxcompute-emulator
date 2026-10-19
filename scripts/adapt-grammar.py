@@ -8,6 +8,9 @@ for name in ('OdpsLexer', 'OdpsParser'):
     text = re.sub(r'\bIdentifier\b', 'IDENTIFIER_TOKEN', text)
     if name == 'OdpsLexer':
         text = text.replace('KW_TIMESTAMP: T I M E S T A M P;', "KW_TIMESTAMP: T I M E S T A M P ('_' N T Z)?;")
+        # JDBC emits an F suffix for setFloat; keep it inside the number token.
+        text = text.replace('(Digit)+ ( DOT (Digit)* (Exponent)? | Exponent)?',
+                            '(Digit)+ ( DOT (Digit)* (Exponent)? | Exponent)? F?')
     if name == 'OdpsParser':
         text = text.replace('    contextSuperClass=OdpsParserRuleContext;', '')
         text = text.replace('[boolean table]', '[bool table]')
