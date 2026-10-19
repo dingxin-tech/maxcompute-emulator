@@ -105,7 +105,7 @@ This is a local/CI test service. By default authentication signatures and permis
 Offline SQL instance results (`?result`) also include the CSV column-name header expected by `SQLTask.getResult`. Empty SELECTs retain that header, while statements with no result schema return an empty result. The legacy Java SDK regression can be run with `mvn -B -f tests/java/pom.xml -Plegacy-sql-sdk -Demulator.image=maxcompute-emulator:dev clean test`.
 
 MCQA sessions cover both of the Java SDK's read paths: the information channel (`SQLExecutor` with `useInstanceTunnel(false)`) answers with CSV whose first line is the column-name header, and the instance tunnel (`?data&cached&taskname=..&queryid=..`, the default fetch and the one JDBC MaxQA uses) answers with a record stream that carries its own schema, so a sub-query result arrives with the same rows and the same types either way. `instance_tunnel_limit_enabled` applies the service's `READ_TABLE_MAX_ROW` (10,000 rows) to that read, `rowrange` pages through it, and `sizelimit` shortens a response instead of failing it. Statements that produce no result set are refused on the tunnel with `InstanceTypeNotSupported`, like the service, so a client confirms them through the session API rather than reading an empty stream. A session is **select-only by default**: a `CREATE`/`INSERT`/`DROP` submitted as a sub query is declined before anything runs (`queryId: -1` plus `ODPS-1850001 Non select query not supported.`), because the Java client reacts to a non-select it learns about at fetch time by running the same statement offline again — and an INSERT that already ran in the session would land twice. Send `odps.sql.session.select.only=false`, in the session settings or per statement, to run them in the session anyway. Session-scoped state (variables, temp objects) is not isolated — statements run against the shared engine. Not simulated: named-session attach (a session name is metadata; equal names create separate sessions), MaxQA v2 (`/mcqa` request prefix), compressed or Arrow-encoded sub-query downloads (Protobuf records only), and per-statement statistics.
-Unsupported: Storage v1 write/incremental sessions, Volume/Blob, CDC/incremental reads, filter predicate pushdown, explicit Schema management, column schema evolution, UDF **execution** (functions are registered metadata; SQL `CREATE FUNCTION`/`DROP FUNCTION` and calling a UDF return `UnsupportedFeature`), volume-backed resources, distributed scheduling, and full ODPS SQL semantics.
+Unsupported: Storage v1 write/incremental sessions, Volume/Blob, CDC/incremental reads, filter predicate pushdown, column schema evolution, UDF **execution** (functions are registered metadata; SQL `CREATE FUNCTION`/`DROP FUNCTION` and calling a UDF return `UnsupportedFeature`), volume-backed resources, distributed scheduling, and full ODPS SQL semantics.
 
 Resource payloads are capped at 64 MiB each and 512 MiB per project/schema. Resource and function names resolve case-insensitively while the uploaded spelling is what listings return. Unsupported operations return errors rather than cloud behavior being assumed.
 
@@ -269,3 +269,11 @@ requests for those capabilities return `UnsupportedOperation`. These limitations
 not be treated as validation of equivalent distributed-service behavior. Independent
 wire tests inspect IPC compression metadata and timestamp values; consumer round trips
 alone are not sufficient protocol evidence.
+
+
+Managed schemas support create/get/list/delete through the SDK REST API, including
+prefix and marker pagination, project isolation and restart persistence. Deleting
+a managed schema is idempotent and cascades to its managed objects. External
+schemas and deletion of the default schema remain unsupported. `SHOW SCHEMAS`
+and fully qualified same-project DDL use the same metadata; cross-project SQL
+and cross-schema SELECT/JOIN remain outside the supported SQL subset.

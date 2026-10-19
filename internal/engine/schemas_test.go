@@ -1,0 +1,70 @@
+package engine
+
+import (
+	"context"
+	"errors"
+	"testing"
+)
+
+func TestSchemaPersistenceAndIsolation(t *testing.T) {
+	ctx := context.Background()
+	path := t.TempDir() + "/schemas.duckdb"
+	e, err := Open(path, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = e.CreateSchema(ctx, "p", "alpha", "comment", false); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.CreateSchema(ctx, "q", "alpha", "other project", false); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.CreateSchema(ctx, "p", "alpha", "replace", false); !errors.Is(err, ErrSchemaExists) {
+		t.Fatal(err)
+	}
+	if err = e.CreateSchema(ctx, "p", "alpha", "replace", true); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.Close(); err != nil {
+		t.Fatal(err)
+	}
+	e, err = Open(path, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	schemas, err := e.Schemas(ctx, "p")
+	if err != nil || len(schemas) != 2 || schemas[0].Comment != "comment" {
+		t.Fatal(schemas, err)
+	}
+	if _, err = e.Execute(ctx, "p", "default", "create table p.alpha.t(id bigint); create table root_table(id string)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.Table(ctx, "p", "default", "root_table"); err != nil {
+		t.Fatal("explicit schema leaked into next statement", err)
+	}
+	shown, err := e.Execute(ctx, "p", "default", "show schemas")
+	if err != nil || len(shown.Rows) != 2 || shown.Rows[0][0] != "alpha" {
+		t.Fatal(shown, err)
+	}
+	if err = e.DeleteSchema(ctx, "p", "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.Table(ctx, "p", "alpha", "t"); err == nil {
+		t.Fatal("cascade left a table")
+	}
+
+	if err = e.DeleteSchema(ctx, "p", "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.DeleteSchema(ctx, "p", "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.DeleteSchema(ctx, "p", "default"); err == nil {
+		t.Fatal("deleted default schema")
+	}
+	schemas, err = e.Schemas(ctx, "q")
+	if err != nil || len(schemas) != 2 {
+		t.Fatal(schemas, err)
+	}
+}

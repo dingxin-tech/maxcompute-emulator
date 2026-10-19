@@ -26,7 +26,7 @@ func Open(path string, maxRows int) (*Engine, error) {
 		return nil, e
 	}
 	db.SetMaxOpenConns(1)
-	for _, q := range []string{"SET memory_limit='512MB'", "SET threads=2", "SET enable_external_access=false", "CREATE TABLE IF NOT EXISTS main.emulator_projects(name VARCHAR PRIMARY KEY)", "CREATE TABLE IF NOT EXISTS main.emulator_catalog(namespace VARCHAR, name VARCHAR, definition VARCHAR, PRIMARY KEY(namespace,name))", "CREATE TABLE IF NOT EXISTS main.emulator_resources(namespace VARCHAR, name VARCHAR, size BIGINT, definition VARCHAR, content BLOB, PRIMARY KEY(namespace,name))", "CREATE TABLE IF NOT EXISTS main.emulator_functions(namespace VARCHAR, name VARCHAR, definition VARCHAR, PRIMARY KEY(namespace,name))"} {
+	for _, q := range []string{"SET memory_limit='512MB'", "SET threads=2", "SET enable_external_access=false", "CREATE TABLE IF NOT EXISTS main.emulator_projects(name VARCHAR PRIMARY KEY)", "CREATE TABLE IF NOT EXISTS main.emulator_schemas(project VARCHAR, name VARCHAR, comment VARCHAR, created BIGINT, PRIMARY KEY(project,name))", "CREATE TABLE IF NOT EXISTS main.emulator_catalog(namespace VARCHAR, name VARCHAR, definition VARCHAR, PRIMARY KEY(namespace,name))", "CREATE TABLE IF NOT EXISTS main.emulator_resources(namespace VARCHAR, name VARCHAR, size BIGINT, definition VARCHAR, content BLOB, PRIMARY KEY(namespace,name))", "CREATE TABLE IF NOT EXISTS main.emulator_functions(namespace VARCHAR, name VARCHAR, definition VARCHAR, PRIMARY KEY(namespace,name))"} {
 		if _, e = db.Exec(q); e != nil {
 			db.Close()
 			return nil, e
@@ -128,9 +128,29 @@ func (e *Engine) Execute(ctx context.Context, p, s, sqlText string) (Result, err
 	}
 	defer tx.Rollback()
 	var result Result
+	activeNamespace := ns
 	for _, ts := range stmts {
-		ts = localQualifiedNames(ts, p, s)
-		result, err = e.exec(ctx, tx, ns, ts)
+		local, selected := localQualifiedNames(ts, p, s)
+		selectedNS := namespace(p, selected)
+		if selected != s && selected != "default" {
+			var count int
+			if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM main.emulator_schemas WHERE project=? AND name=?", p, selected).Scan(&count); err != nil {
+				return Result{}, err
+			}
+			if count == 0 {
+				return Result{}, ErrSchemaMissing
+			}
+		}
+		if activeNamespace != selectedNS {
+			if _, err = tx.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS "+Quote(selectedNS)); err != nil {
+				return Result{}, err
+			}
+			if _, err = tx.ExecContext(ctx, "SET schema = '"+selectedNS+"'"); err != nil {
+				return Result{}, err
+			}
+			activeNamespace = selectedNS
+		}
+		result, err = e.exec(ctx, tx, selectedNS, p, local)
 		if err != nil {
 			return Result{}, err
 		}
@@ -140,7 +160,7 @@ func (e *Engine) Execute(ctx context.Context, p, s, sqlText string) (Result, err
 	}
 	return result, tx.Commit()
 }
-func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (Result, error) {
+func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns, project string, ts []string) (Result, error) {
 	none := Result{}
 	if len(ts) == 0 {
 		return none, nil
@@ -156,6 +176,11 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		}
 	}
 	switch word(ts[0]) {
+	case "show":
+		if len(ts) == 2 && word(ts[1]) == "schemas" {
+			return e.query(ctx, tx, "SELECT name AS schema_name FROM main.emulator_schemas WHERE project=? UNION ALL SELECT 'default' ORDER BY schema_name", project)
+		}
+		return none, fmt.Errorf("UnsupportedFeature: SHOW statement")
 	case "set":
 		if len(ts) >= 3 && strings.ToLower(strings.Join(ts[1:], "")) == "odps.sql.type.system.odps2=true" {
 			return none, nil
@@ -452,20 +477,13 @@ func (e *Engine) query(ctx context.Context, tx *sql.Tx, q string, args ...any) (
 	}
 	r := Result{Rows: [][]any{}}
 	for _, c := range cts {
-		typ := strings.ToLower(c.DatabaseTypeName())
-		switch typ {
-		case "varchar":
-			typ = "string"
-		case "integer":
-			typ = "int"
-		case "timestamp_ms":
-			typ = "datetime"
-		case "timestamp_ns":
-			typ = "timestamp"
+		typ, err := resultType(c.DatabaseTypeName())
+		if err != nil {
+			return Result{}, err
 		}
 		col, e := NewColumn(c.Name(), typ)
 		if e != nil {
-			col = Column{Name: c.Name(), Type: typ}
+			return Result{}, e
 		}
 		r.Columns = append(r.Columns, col)
 	}
