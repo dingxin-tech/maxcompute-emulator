@@ -276,4 +276,6 @@ prefix and marker pagination, project isolation and restart persistence. Deletin
 a managed schema is idempotent and cascades to its managed objects. External
 schemas and deletion of the default schema remain unsupported. `SHOW SCHEMAS`
 and fully qualified same-project DDL use the same metadata; cross-project SQL
-and cross-schema SELECT/JOIN remain outside the supported SQL subset.
+and cross-schema SELECT/JOIN (including INSERT SELECT) remain outside the supported
+SQL subset. Non-default schemas must exist; deleted schemas cannot be recreated
+by an old connection or an object API request.

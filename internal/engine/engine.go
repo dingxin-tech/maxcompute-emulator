@@ -49,6 +49,10 @@ func (e *Engine) transaction(ctx context.Context, p, s string) (*sql.Tx, string,
 	if err != nil {
 		return nil, ns, err
 	}
+	if err = requireSchema(ctx, tx, p, s); err != nil {
+		tx.Rollback()
+		return nil, ns, err
+	}
 	if _, err = tx.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS "+Quote(ns)); err == nil {
 		_, err = tx.ExecContext(ctx, "SET schema = '"+ns+"'")
 	}
@@ -96,6 +100,9 @@ func (e *Engine) Table(ctx context.Context, p, s, n string) (Table, error) {
 func (e *Engine) Tables(ctx context.Context, p, s string) ([]Table, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if err := requireSchema(ctx, e.db, p, s); err != nil {
+		return nil, err
+	}
 	rows, err := e.db.QueryContext(ctx, "SELECT definition FROM main.emulator_catalog WHERE namespace=? ORDER BY name", namespace(p, s))
 	if err != nil {
 		return nil, err
@@ -132,13 +139,14 @@ func (e *Engine) Execute(ctx context.Context, p, s, sqlText string) (Result, err
 	for _, ts := range stmts {
 		local, selected := localQualifiedNames(ts, p, s)
 		selectedNS := namespace(p, selected)
-		if selected != s && selected != "default" {
-			var count int
-			if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM main.emulator_schemas WHERE project=? AND name=?", p, selected).Scan(&count); err != nil {
-				return Result{}, err
-			}
-			if count == 0 {
-				return Result{}, ErrSchemaMissing
+		if err = requireSchema(ctx, tx, p, selected); err != nil {
+			return Result{}, err
+		}
+		if selected != s && len(local) > 0 && word(local[0]) == "insert" {
+			for _, token := range local {
+				if strings.EqualFold(token, "select") || strings.EqualFold(token, "with") {
+					return Result{}, fmt.Errorf("UnsupportedFeature: cross-schema INSERT SELECT")
+				}
 			}
 		}
 		if activeNamespace != selectedNS {

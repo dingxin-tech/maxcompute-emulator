@@ -101,6 +101,9 @@ func TestResourceValidationAndBudget(t *testing.T) {
 		t.Fatalf("growth beyond the budget: %v", err)
 	}
 	// Schemas keep their own namespace budget.
+	if err = e.CreateSchema(ctx, "p", "other", "", false); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = e.PutResource(ctx, "p", "other", "big.bin", "file", "", false, "", bytes.Repeat([]byte("x"), 64), ResourceCreate); err != nil {
 		t.Fatalf("schema isolation: %v", err)
 	}

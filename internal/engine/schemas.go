@@ -22,6 +22,34 @@ type Schema struct {
 	Created int64
 }
 
+type schemaQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func requireSchema(ctx context.Context, q schemaQuerier, project, name string) error {
+	if name == "default" {
+		return nil
+	}
+	var count int
+	if err := q.QueryRowContext(ctx, "SELECT count(*) FROM main.emulator_schemas WHERE project=? AND name=?", project, name).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrSchemaMissing
+	}
+	return nil
+}
+
+func (e *Engine) HasSchema(ctx context.Context, project, name string) (bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	err := requireSchema(ctx, e.db, project, name)
+	if errors.Is(err, ErrSchemaMissing) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (e *Engine) Schemas(ctx context.Context, project string) ([]Schema, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

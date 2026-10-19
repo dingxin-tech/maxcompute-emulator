@@ -62,6 +62,16 @@ func TestSchemaREST(t *testing.T) {
 	if code != 404 || !strings.Contains(string(body), "NoSuchObject") {
 		t.Fatalf("deleted schema: %d %s", code, body)
 	}
+	for _, path := range []string{"/projects/p/schemas/alpha/tables", "/projects/p/schemas/alpha/resources", "/projects/p/schemas/alpha/registration/functions"} {
+		code, body = sendBody(t, h, "GET", path, nil, nil)
+		if code != 404 || !strings.Contains(string(body), "NoSuchObject") {
+			t.Fatalf("deleted schema object route: %d %s", code, body)
+		}
+	}
+	code, body = sendBody(t, h, "POST", "/projects/p/instances?curr_schema=alpha", []byte("<Instance/>"), nil)
+	if code != 404 || !strings.Contains(string(body), "NoSuchObject") {
+		t.Fatalf("old connection recreated deleted schema: %d %s", code, body)
+	}
 	code, body = sendBody(t, h, "POST", "/projects/p/schemas", []byte("<Schema><Name>bad"), nil)
 	if code != 400 || !strings.Contains(string(body), "SchemaParseError") {
 		t.Fatalf("invalid XML: %d %s", code, body)

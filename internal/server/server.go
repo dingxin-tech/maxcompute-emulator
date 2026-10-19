@@ -279,6 +279,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		schema = rest[1]
 		rest = rest[2:]
 	}
+	if len(rest) > 0 && (rest[0] == "tables" || rest[0] == "resources" || rest[0] == "registration" || (rest[0] == "instances" && len(rest) == 1 && r.Method == "POST")) {
+		exists, err := s.Engine.HasSchema(ctx, project, schema)
+		if err != nil {
+			fail(w, r, 500, "InternalError", err)
+			return
+		}
+		if !exists {
+			fail(w, r, 404, "NoSuchObject", engine.ErrSchemaMissing)
+			return
+		}
+	}
 	if len(rest) == 0 && r.Method == "GET" {
 		w.Header().Set("x-odps-owner", "emulator")
 		w.Header().Set("x-odps-creation-time", start.UTC().Format(http.TimeFormat))

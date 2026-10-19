@@ -50,6 +50,12 @@ func TestSchemaPersistenceAndIsolation(t *testing.T) {
 	if err = e.DeleteSchema(ctx, "p", "alpha"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = e.Execute(ctx, "p", "alpha", "create table resurrected(id bigint)"); !errors.Is(err, ErrSchemaMissing) {
+		t.Fatal("deleted schema was revived", err)
+	}
+	if _, err = e.PutResource(ctx, "p", "alpha", "r.py", "py", "", false, "", nil, ResourceCreate); !errors.Is(err, ErrSchemaMissing) {
+		t.Fatal("resource revived deleted schema", err)
+	}
 	if _, err = e.Table(ctx, "p", "alpha", "t"); err == nil {
 		t.Fatal("cascade left a table")
 	}
@@ -66,5 +72,34 @@ func TestSchemaPersistenceAndIsolation(t *testing.T) {
 	schemas, err = e.Schemas(ctx, "q")
 	if err != nil || len(schemas) != 2 {
 		t.Fatal(schemas, err)
+	}
+}
+
+func TestExplicitInsertDoesNotRebindSourceSchema(t *testing.T) {
+	ctx := context.Background()
+	e, err := Open("", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if err = e.CreateSchema(ctx, "p", "alpha", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.Execute(ctx, "p", "default", "create table src(id bigint);insert into src values(1);create table p.alpha.src(id bigint);insert into p.alpha.src values(2);create table p.alpha.dst(id bigint)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.Execute(ctx, "p", "default", "insert into p.alpha.dst select * from src"); err == nil {
+		t.Fatal("cross-schema INSERT SELECT accepted")
+	}
+	rows, _, err := e.Snapshot(ctx, "p", "alpha", "dst", nil)
+	if err != nil || len(rows.Rows) != 0 {
+		t.Fatal("rejected insert changed the destination", rows, err)
+	}
+	if _, err = e.Execute(ctx, "p", "default", "insert into p.alpha.dst values(3)"); err != nil {
+		t.Fatal(err)
+	}
+	rows, _, err = e.Snapshot(ctx, "p", "alpha", "dst", nil)
+	if err != nil || len(rows.Rows) != 1 || rows.Rows[0][0] != int64(3) {
+		t.Fatal(rows, err)
 	}
 }
