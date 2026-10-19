@@ -80,6 +80,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer e.Close()
+	if *schema != "default" {
+		if err = e.CreateSchema(context.Background(), *project, *schema, "", true); err != nil {
+			slog.Error("fixture schema", "error", err)
+			os.Exit(1)
+		}
+	}
 	if *seed != "" {
 		b, err := os.ReadFile(*seed)
 		if err == nil {

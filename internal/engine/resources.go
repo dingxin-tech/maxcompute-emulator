@@ -109,6 +109,9 @@ const (
 func (e *Engine) PutResource(ctx context.Context, p, s, name, typ, comment string, isTemp bool, tableSource string, content []byte, mode ResourceMode) (Resource, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if err := requireSchema(ctx, e.db, p, s); err != nil {
+		return Resource{}, err
+	}
 	n, err := resourceName(name)
 	if err != nil {
 		return Resource{}, err
@@ -175,6 +178,9 @@ func (e *Engine) PutResource(ctx context.Context, p, s, name, typ, comment strin
 func (e *Engine) Resource(ctx context.Context, p, s, name string) (Resource, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if err := requireSchema(ctx, e.db, p, s); err != nil {
+		return Resource{}, err
+	}
 	r, _, err := e.lookupResource(ctx, namespace(p, s), strings.ToLower(strings.TrimSpace(name)))
 	return r, err
 }
@@ -183,6 +189,9 @@ func (e *Engine) Resource(ctx context.Context, p, s, name string) (Resource, err
 func (e *Engine) ResourceContent(ctx context.Context, p, s, name string) (Resource, []byte, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if err := requireSchema(ctx, e.db, p, s); err != nil {
+		return Resource{}, nil, err
+	}
 	r, c, err := e.lookupResource(ctx, namespace(p, s), strings.ToLower(strings.TrimSpace(name)))
 	if err != nil {
 		return r, nil, err
@@ -197,6 +206,9 @@ func (e *Engine) ResourceContent(ctx context.Context, p, s, name string) (Resour
 func (e *Engine) Resources(ctx context.Context, p, s string) ([]Resource, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if err := requireSchema(ctx, e.db, p, s); err != nil {
+		return nil, err
+	}
 	rows, err := e.db.QueryContext(ctx, "SELECT definition FROM main.emulator_resources WHERE namespace=? ORDER BY name", namespace(p, s))
 	if err != nil {
 		return nil, err
@@ -220,6 +232,9 @@ func (e *Engine) Resources(ctx context.Context, p, s string) ([]Resource, error)
 func (e *Engine) DeleteResource(ctx context.Context, p, s, name string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if err := requireSchema(ctx, e.db, p, s); err != nil {
+		return err
+	}
 	res, err := e.db.ExecContext(ctx, "DELETE FROM main.emulator_resources WHERE namespace=? AND name=?", namespace(p, s), strings.ToLower(strings.TrimSpace(name)))
 	if err != nil {
 		return err
@@ -233,6 +248,9 @@ func (e *Engine) DeleteResource(ctx context.Context, p, s, name string) error {
 func (e *Engine) PutFunction(ctx context.Context, p, s string, f Function, overwrite bool) (Function, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if err := requireSchema(ctx, e.db, p, s); err != nil {
+		return Function{}, err
+	}
 	n, err := functionName(f.Name)
 	if err != nil {
 		return Function{}, err
@@ -302,6 +320,9 @@ func (e *Engine) lookupFunction(ctx context.Context, ns, key string) (Function, 
 func (e *Engine) Function(ctx context.Context, p, s, name string) (Function, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if err := requireSchema(ctx, e.db, p, s); err != nil {
+		return Function{}, err
+	}
 	return e.lookupFunction(ctx, namespace(p, s), strings.ToLower(strings.TrimSpace(name)))
 }
 
@@ -309,6 +330,9 @@ func (e *Engine) Function(ctx context.Context, p, s, name string) (Function, err
 func (e *Engine) Functions(ctx context.Context, p, s string) ([]Function, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if err := requireSchema(ctx, e.db, p, s); err != nil {
+		return nil, err
+	}
 	rows, err := e.db.QueryContext(ctx, "SELECT definition FROM main.emulator_functions WHERE namespace=? ORDER BY name", namespace(p, s))
 	if err != nil {
 		return nil, err
@@ -332,6 +356,9 @@ func (e *Engine) Functions(ctx context.Context, p, s string) ([]Function, error)
 func (e *Engine) DeleteFunction(ctx context.Context, p, s, name string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if err := requireSchema(ctx, e.db, p, s); err != nil {
+		return err
+	}
 	res, err := e.db.ExecContext(ctx, "DELETE FROM main.emulator_functions WHERE namespace=? AND name=?", namespace(p, s), strings.ToLower(strings.TrimSpace(name)))
 	if err != nil {
 		return err

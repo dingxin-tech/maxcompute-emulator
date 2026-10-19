@@ -19,6 +19,8 @@ ANTLR_JAR=/path/to/antlr-4.13.2-complete.jar scripts/generate-parser.sh
 
 The adaptation also recognizes TIMESTAMP_NTZ as a timestamp token while retaining
 its original token text for the engine type mapping. Upstream files stay unchanged.
+It retains JDBC's F suffix in numeric tokens so FLOAT parameters can be translated
+without changing string literals or identifiers.
 
 The lexer MUST be generated first and the parser must use its matching tokens.
 The parser validates syntax; internal/engine implements the supported execution
