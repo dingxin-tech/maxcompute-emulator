@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -35,6 +36,17 @@ func TestODPSTypedNumericLiterals(t *testing.T) {
 	for _, literal := range []string{"128Y", "-129Y", "32768S", "-32769S", "9223372036854775808L"} {
 		if _, err := e.Execute(context.Background(), "p", "default", "select "+literal); err == nil {
 			t.Errorf("out-of-range literal accepted: %s", literal)
+		}
+	}
+	for _, query := range []string{
+		"select 1 where -128Y = -128Y",
+		"select 1 having -32768S = -32768S",
+		"select case -9223372036854775808L when -9223372036854775808L then 1 else 0 end",
+		"select cast(not -128Y = 0Y as int)",
+	} {
+		r, err := e.Execute(context.Background(), "p", "default", query)
+		if err != nil || len(r.Rows) != 1 || fmt.Sprint(r.Rows[0][0]) != "1" {
+			t.Fatalf("signed minimum in expression: %s: %+v %v", query, r, err)
 		}
 	}
 	r, err := e.Execute(context.Background(), "p", "default", "select '73L' as `10BD`, 5L - 2L as n, -(1L) as m")

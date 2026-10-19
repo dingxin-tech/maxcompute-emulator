@@ -59,7 +59,8 @@ func unaryPosition(ts []string, i int) bool {
 		return true
 	}
 	switch strings.ToLower(ts[i-1]) {
-	case "(", ",", "+", "-", "*", "/", "%", "=", "<", ">", "<=", ">=", "<>", "!=", "select", "when", "then", "else", "and", "or", "between":
+	case "(", ",", "+", "-", "*", "/", "%", "=", "<", ">", "<=", ">=", "<>", "!=", "&", "|", "^", "~", "!",
+		"select", "distinct", "all", "where", "having", "on", "case", "when", "then", "else", "not", "and", "or", "between", "by", "in", "is":
 		return true
 	}
 	return false
