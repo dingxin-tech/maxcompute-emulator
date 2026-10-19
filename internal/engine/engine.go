@@ -177,8 +177,21 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns, project string, ts []
 	}
 	switch word(ts[0]) {
 	case "show":
-		if len(ts) == 2 && word(ts[1]) == "schemas" {
-			return e.query(ctx, tx, "SELECT name AS schema_name FROM main.emulator_schemas WHERE project=? UNION ALL SELECT 'default' ORDER BY schema_name", project)
+		if len(ts) >= 2 && word(ts[1]) == "schemas" && (len(ts) == 2 || (len(ts) == 4 && word(ts[2]) == "in")) {
+			selected := project
+			if len(ts) == 4 {
+				selected = word(ts[3])
+			}
+			if selected != project {
+				var count int
+				if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM main.emulator_projects WHERE name=?", selected).Scan(&count); err != nil {
+					return none, err
+				}
+				if count == 0 {
+					return none, fmt.Errorf("ODPS-0420111: project does not exist")
+				}
+			}
+			return e.query(ctx, tx, "SELECT name AS schema_name FROM main.emulator_schemas WHERE project=? UNION ALL SELECT 'default' ORDER BY schema_name", selected)
 		}
 		return none, fmt.Errorf("UnsupportedFeature: SHOW statement")
 	case "set":

@@ -59,6 +59,20 @@ public class JdbcDriverTest {
   }
 
   @Test
+  void nestedQueryResultsUseOdpsTypeNames() throws Exception {
+    try (Connection c = DriverManager.getConnection(url());
+        Statement s = c.createStatement();
+        ResultSet r = s.executeQuery("select array(1,2) as a, map('x',array(3,4)) as m, named_struct('name','person','age',20) as p")) {
+      assertTrue(r.next());
+      assertEquals(Types.ARRAY, r.getMetaData().getColumnType(1));
+      assertArrayEquals(new Object[] {1,2}, (Object[]) r.getArray(1).getArray());
+      assertTrue(r.getString(2).contains("x"));
+      assertTrue(r.getString(3).contains("person"));
+      assertFalse(r.next());
+    }
+  }
+
+  @Test
   void preparedNumericParametersPreserveTheirTypesAndBounds() throws Exception {
     try (Connection c = DriverManager.getConnection(url());
         PreparedStatement p = c.prepareStatement("select ? as y, ? as s, ? as n, ? as d, ? as f")) {

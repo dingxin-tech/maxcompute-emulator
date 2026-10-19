@@ -12,6 +12,17 @@ import (
 	"github.com/dingxin-tech/maxcompute-emulator/internal/engine"
 )
 
+// SHOW SCHEMAS task text is a list of names, consumed by metadata clients via
+// getTaskResults(). SELECT task text retains the header needed by SQLTask.getResult().
+func schemaListingSQL(query string) bool {
+	stmts, err := engine.Lex(query)
+	if err != nil || len(stmts) == 0 {
+		return false
+	}
+	last := stmts[len(stmts)-1]
+	return len(last) >= 2 && strings.EqualFold(last[0], "show") && strings.EqualFold(last[1], "schemas")
+}
+
 func schemaXML(project string, schema engine.Schema) string {
 	return "<Schema><Name>" + esc(schema.Name) + "</Name><Project>" + esc(project) + "</Project><Type>MANAGED</Type><Comment>" + esc(schema.Comment) + "</Comment><Owner>emulator</Owner></Schema>"
 }

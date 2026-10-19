@@ -43,7 +43,7 @@ func TestSchemaPersistenceAndIsolation(t *testing.T) {
 	if _, err = e.Table(ctx, "p", "default", "root_table"); err != nil {
 		t.Fatal("explicit schema leaked into next statement", err)
 	}
-	shown, err := e.Execute(ctx, "p", "default", "show schemas")
+	shown, err := e.Execute(ctx, "p", "default", "show schemas in p")
 	if err != nil || len(shown.Rows) != 2 || shown.Rows[0][0] != "alpha" {
 		t.Fatal(shown, err)
 	}

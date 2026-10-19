@@ -77,6 +77,42 @@ public class EmulatorTest {
   }
 
   @Test
+  void managedSchemaMetadataAndCascadeAreIsolated() throws Exception {
+    String a = "schema_" + UUID.randomUUID().toString().replace("-", "");
+    String b = a + "_other";
+    String project = odps.getDefaultProject();
+    odps.schemas().create(project, a, "schema comment", false);
+    odps.schemas().create(project, b);
+    try {
+      Schema schema = odps.schemas().get(project, a);
+      schema.reload();
+      assertEquals("schema comment", schema.getComment());
+      assertEquals("MANAGED", schema.getType());
+      Set<String> names = new HashSet<>();
+      odps.schemas().iterator(project).forEachRemaining(s -> names.add(s.getName()));
+      assertTrue(names.containsAll(List.of(a, b, "default")));
+      TableSchema table = new TableSchema();
+      table.addColumn(new Column("id", OdpsType.BIGINT));
+      for (String name : List.of(a, b)) {
+        odps.tables().newTableCreator(project, "same_table", table).withSchemaName(name).create();
+      }
+      Instance listing = SQLTask.run(odps, "show schemas in " + project);
+      listing.waitForSuccess();
+      String raw = listing.getTaskResults().get("AnonymousSQLTask");
+      assertTrue(raw.contains(a));
+      assertFalse(raw.contains("schema_name"), "schema task text is names without a SELECT header");
+      odps.schemas().delete(project, a);
+      odps.schemas().delete(project, a);
+      assertFalse(odps.schemas().exists(project, a));
+      assertFalse(odps.tables().exists(project, a, "same_table"));
+      assertTrue(odps.tables().exists(project, b, "same_table"));
+    } finally {
+      odps.schemas().delete(project, a);
+      odps.schemas().delete(project, b);
+    }
+  }
+
+  @Test
   void sdkTableCreateDeleteAndIdentity() throws Exception {
     String t = table();
     TableSchema schema = new TableSchema();
