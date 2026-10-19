@@ -102,3 +102,24 @@ func TestConcurrentTokenHeavySQL(t *testing.T) {
 		}
 	}
 }
+
+func TestResultFormatComesFromExecutedStatement(t *testing.T) {
+	e, err := Open("", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	for _, tc := range []struct {
+		sql string
+		raw bool
+	}{
+		{"show schemas", true},
+		{"show schemas; select 'schemas' as v", false},
+		{"select 1; /*name listing*/ show schemas", true},
+	} {
+		r, err := e.Execute(context.Background(), "p", "default", tc.sql)
+		if err != nil || r.RawNameList != tc.raw {
+			t.Fatalf("result format %q: %+v %v", tc.sql, r, err)
+		}
+	}
+}

@@ -206,7 +206,9 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns, project string, ts []
 					return none, fmt.Errorf("ODPS-0420111: project does not exist")
 				}
 			}
-			return e.query(ctx, tx, "SELECT name AS schema_name FROM main.emulator_schemas WHERE project=? UNION ALL SELECT 'default' ORDER BY schema_name", selected)
+			result, err := e.query(ctx, tx, "SELECT name AS schema_name FROM main.emulator_schemas WHERE project=? UNION ALL SELECT 'default' ORDER BY schema_name", selected)
+			result.RawNameList = true
+			return result, err
 		}
 		return none, fmt.Errorf("UnsupportedFeature: SHOW statement")
 	case "set":
