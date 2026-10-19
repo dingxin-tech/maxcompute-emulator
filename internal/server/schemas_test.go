@@ -47,7 +47,11 @@ func TestSchemaREST(t *testing.T) {
 	if _, err := s.Engine.Execute(context.Background(), "p", "alpha", "create table t(id bigint)"); err != nil {
 		t.Fatal(err)
 	}
-	code, body = sendBody(t, h, "DELETE", "/projects/p/schemas/alpha", nil, nil)
+	code, body = sendBody(t, h, "GET", "/projects/p/schemas/ALPHA/tables/t", nil, nil)
+	if code != 200 || !strings.Contains(string(body), "<SchemaName>alpha</SchemaName>") {
+		t.Fatalf("uppercase schema object path: %d %s", code, body)
+	}
+	code, body = sendBody(t, h, "DELETE", "/projects/p/schemas/ALPHA", nil, nil)
 	if code != 204 {
 		t.Fatalf("cascade: %d %s", code, body)
 	}

@@ -266,7 +266,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !s.beforeProjectRequest(w, r) {
 		return
 	}
-	schema := r.URL.Query().Get("curr_schema")
+	schema := strings.ToLower(r.URL.Query().Get("curr_schema"))
 	if schema == "" {
 		schema = "default"
 	}
@@ -276,7 +276,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(rest) >= 2 && rest[0] == "schemas" {
-		schema = rest[1]
+		schema = strings.ToLower(rest[1])
 		rest = rest[2:]
 	}
 	if len(rest) > 0 && (rest[0] == "tables" || rest[0] == "resources" || rest[0] == "registration" || (rest[0] == "instances" && len(rest) == 1 && r.Method == "POST")) {

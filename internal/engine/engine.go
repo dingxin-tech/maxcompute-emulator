@@ -40,6 +40,7 @@ func Open(path string, maxRows int) (*Engine, error) {
 }
 func (e *Engine) Close() error { return e.db.Close() }
 func namespace(p, s string) string {
+	s = strings.ToLower(s)
 	x := sha256.Sum256([]byte(p + "\x00" + s))
 	return "n_" + hex.EncodeToString(x[:12])
 }
@@ -123,6 +124,7 @@ func (e *Engine) Tables(ctx context.Context, p, s string) ([]Table, error) {
 	return out, rows.Err()
 }
 func (e *Engine) Execute(ctx context.Context, p, s, sqlText string) (Result, error) {
+	s = strings.ToLower(s)
 	stmts, err := Lex(sqlText)
 	if err != nil {
 		return Result{}, err

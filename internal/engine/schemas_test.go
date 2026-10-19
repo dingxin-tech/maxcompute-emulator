@@ -13,7 +13,7 @@ func TestSchemaPersistenceAndIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = e.CreateSchema(ctx, "p", "alpha", "comment", false); err != nil {
+	if err = e.CreateSchema(ctx, "p", "ALPHA", "comment", false); err != nil {
 		t.Fatal(err)
 	}
 	if err = e.CreateSchema(ctx, "q", "alpha", "other project", false); err != nil {
@@ -39,6 +39,13 @@ func TestSchemaPersistenceAndIsolation(t *testing.T) {
 	}
 	if _, err = e.Execute(ctx, "p", "default", "create table p.alpha.t(id bigint); create table root_table(id string)"); err != nil {
 		t.Fatal(err)
+	}
+	if _, err = e.Execute(ctx, "p", "ALPHA", "insert into t values(73L)"); err != nil {
+		t.Fatal("uppercase current schema", err)
+	}
+	rows, _, err := e.Snapshot(ctx, "p", "alpha", "t", nil)
+	if err != nil || len(rows.Rows) != 1 || rows.Rows[0][0] != int64(73) {
+		t.Fatal("case variants have different storage", rows, err)
 	}
 	if _, err = e.Table(ctx, "p", "default", "root_table"); err != nil {
 		t.Fatal("explicit schema leaked into next statement", err)

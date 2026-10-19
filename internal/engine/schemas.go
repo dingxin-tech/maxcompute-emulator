@@ -27,6 +27,7 @@ type schemaQuerier interface {
 }
 
 func requireSchema(ctx context.Context, q schemaQuerier, project, name string) error {
+	name = strings.ToLower(name)
 	if name == "default" {
 		return nil
 	}
