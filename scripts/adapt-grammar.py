@@ -11,6 +11,9 @@ for name in ('OdpsLexer', 'OdpsParser'):
         # JDBC emits an F suffix for setFloat; keep it inside the number token.
         text = text.replace('(Digit)+ ( DOT (Digit)* (Exponent)? | Exponent)?',
                             '(Digit)+ ( DOT (Digit)* (Exponent)? | Exponent)? F?')
+        # Activate the public grammar's ordinary block-comment rule. Optimizer
+        # hints retain HintStart tokens, including whitespace before the '+'.
+        text += "\nBlockComment: ('/*' [ \\r\\t]* '*/' | '/*' [ \\r\\t]* ~[ \\r\\t+] .*? '*/') -> channel(COMMENT_CHANNEL);\n"
     if name == 'OdpsParser':
         text = text.replace('    contextSuperClass=OdpsParserRuleContext;', '')
         text = text.replace('[boolean table]', '[bool table]')

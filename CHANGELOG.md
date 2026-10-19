@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Accept ordinary block comments in SQL, including long comments within the SQL byte limit, while preserving string literal contents and optimizer-hint tokens.
 - Execute JDBC typed numeric literals (`L`, `Y`, `S`, `BD`, `F`) with their declared types, decimal precision and range checks, including signed minimum integers. Add engine and published-driver regressions; strings and quoted identifiers remain unchanged.
 - Translate nested query result types to ODPS ARRAY/MAP/STRUCT metadata before serving Tunnel results.
 - Add persistent managed Schema create/get/list/delete APIs with project isolation, prefix/paginated listing, idempotent deletion and cascade removal of managed objects.
