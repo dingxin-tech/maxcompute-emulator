@@ -21,6 +21,8 @@ The adaptation also recognizes TIMESTAMP_NTZ as a timestamp token while retainin
 its original token text for the engine type mapping. Upstream files stay unchanged.
 It retains JDBC's F suffix in numeric tokens so FLOAT parameters can be translated
 without changing string literals or identifiers.
+Ordinary `/* ... */` comments use the public grammar's commented-out block-comment
+rule on the comment channel. String literals and optimizer-hint tokens remain distinct.
 
 The lexer MUST be generated first and the parser must use its matching tokens.
 The parser validates syntax; internal/engine implements the supported execution

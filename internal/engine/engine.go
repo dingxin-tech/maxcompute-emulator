@@ -125,12 +125,17 @@ func (e *Engine) Tables(ctx context.Context, p, s string) ([]Table, error) {
 }
 func (e *Engine) Execute(ctx context.Context, p, s, sqlText string) (Result, error) {
 	s = strings.ToLower(s)
+	// This engine already has one execution connection. Include syntax validation
+	// in that budget so concurrent long SQL cannot build many parser contexts at once.
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	stmts, err := Lex(sqlText)
 	if err != nil {
 		return Result{}, err
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	tx, ns, err := e.transaction(ctx, p, s)
 	if err != nil {
 		return Result{}, err
@@ -201,7 +206,9 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns, project string, ts []
 					return none, fmt.Errorf("ODPS-0420111: project does not exist")
 				}
 			}
-			return e.query(ctx, tx, "SELECT name AS schema_name FROM main.emulator_schemas WHERE project=? UNION ALL SELECT 'default' ORDER BY schema_name", selected)
+			result, err := e.query(ctx, tx, "SELECT name AS schema_name FROM main.emulator_schemas WHERE project=? UNION ALL SELECT 'default' ORDER BY schema_name", selected)
+			result.RawNameList = true
+			return result, err
 		}
 		return none, fmt.Errorf("UnsupportedFeature: SHOW statement")
 	case "set":

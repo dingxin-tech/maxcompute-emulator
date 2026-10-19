@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/antlr4-go/antlr/v4"
 	parser "github.com/dingxin-tech/maxcompute-emulator/internal/sqlparser"
@@ -21,10 +22,17 @@ func (e *syntaxErrors) SyntaxError(_ antlr.Recognizer, _ interface{}, line, col 
 		e.message = fmt.Sprintf("SQL %d:%d: %s", line, col, msg)
 	}
 }
+
+// Classification and execution share this process-wide validation budget. SQLRT
+// admission also calls Lex outside Engine.Execute; long parses must stay bounded there too.
+var sqlValidationMu sync.Mutex
+
 func Lex(sql string) ([][]string, error) {
 	if len(sql) > 1<<20 {
 		return nil, fmt.Errorf("SQL exceeds 1 MiB")
 	}
+	sqlValidationMu.Lock()
+	defer sqlValidationMu.Unlock()
 	if !strings.HasSuffix(strings.TrimSpace(sql), ";") {
 		sql += ";"
 	}
@@ -34,6 +42,9 @@ func Lex(sql string) ([][]string, error) {
 	l.AddErrorListener(errListener)
 	ts := antlr.NewCommonTokenStream(l, antlr.TokenDefaultChannel)
 	p := parser.NewOdpsParser(ts)
+	// Execution consumes the token stream, not a syntax tree. Keep validation,
+	// but do not retain a full tree for every concurrent long SQL submission.
+	p.BuildParseTrees = false
 	p.RemoveErrorListeners()
 	p.AddErrorListener(errListener)
 	p.Script()
