@@ -34,6 +34,9 @@ func Lex(sql string) ([][]string, error) {
 	l.AddErrorListener(errListener)
 	ts := antlr.NewCommonTokenStream(l, antlr.TokenDefaultChannel)
 	p := parser.NewOdpsParser(ts)
+	// Execution consumes the token stream, not a syntax tree. Keep validation,
+	// but do not retain a full tree for every concurrent long SQL submission.
+	p.BuildParseTrees = false
 	p.RemoveErrorListeners()
 	p.AddErrorListener(errListener)
 	p.Script()
