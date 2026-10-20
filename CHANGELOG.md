@@ -8,6 +8,30 @@
 - Translate nested query result types to ODPS ARRAY/MAP/STRUCT metadata before serving Tunnel results.
 - Add persistent managed Schema create/get/list/delete APIs with project isolation, prefix/paginated listing, idempotent deletion and cascade removal of managed objects.
 
+- Answer `SELECT get_latest_version('<project>[.<schema>].<table>')` in the SQL plane. It is
+  the poll a delta source makes before it plans a CDC window, so it now returns the same
+  number an incremental session reports as `LatestVersion` - including zero for an empty
+  ACID table, and the cutoff for a window that starts at the polled version and reads
+  nothing. A plain table and an unresolvable name are refused instead of answered with
+  zero, and `/capabilities` lists the function.
+
+- **Behavior change:** Storage v1 read sessions now accept `CrossPartition` instead of refusing it. The public table API (the surface the Flink/Spark connectors build on) defaults the flag to true, and every emulator read is answered with one logical split that already spans the selected partitions, so the refusal made the v1 batch and incremental paths unusable by a default-configured consumer without changing any observable result. Bucket splits, parallelism greater than one and bucket sort still fail explicitly.
+
+- Add Storage v1/v2 **incremental reads** over a version window for ACID tables: sessions created with `session_type=incremental_read` (v1) or `IncrementalRead=true` plus `IncrementalReadOptions` (v2) return the events published in `(StartVersion, EndVersion]`, echo `IncrementalReadOptions`, and publish `LatestVersion` so a consumer can store the version it reached and ask only for what follows. Every event carries the NOT NULL system columns `__meta_op_type` (`tinyint`) and `__meta_timestamp`; `cdc` includes update-before/delete images, `append` returns new content only.
+- Delta tables (primary key plus `transactional` or format-version 2) now keep row-level versions: each published row carries a sequence-stamped version, operation and commit time, and every write path - SQL `INSERT`, Tunnel upload, Storage batch/streaming/upsert commits, `INSERT OVERWRITE`, `TRUNCATE` and `ALTER TABLE DROP PARTITION` - appends its events to an append-only history, so a window still shows an insert that a later delete removed. The version columns are hidden from every projection and schema a user can see (`SELECT *` returns the declared columns).
+- Refuse the incremental forms that are not simulated, with the service's own status rather than an empty success: non-ACID tables, timestamp windows, `StartTxnId`, and filter predicates on an incremental window. `/capabilities` now declares `storage_incremental_read` and names each gap.
+- Aligned the incremental read shapes with a live project after measuring them:
+  append answers what is new from live rows, so a row inserted and then deleted
+  inside the same window appears in neither view, where before this it replayed the
+  insert; the CDC view publishes the after-image of a replacement as the services
+  update-after code while the live row keeps 8; LatestTxnId comes back as the empty
+  string the service returns. Per-row version advance, the data, system and
+  partition field order, and the ACID gate were confirmed rather than assumed.
+
+- Left open by that run and still documented as unverified rather than guessed: the
+  rule that separates the two update-after codes, event ordering across partitions or
+  under concurrent writers, and the timestamp-window form, which stays refused.
+
 - Document the two measured divergences from the live service in README - the status and error codes a refused chunked merge returns (`500`/`409` with `ODPS-0421213`/`ODPS-0421121` in the cloud, `400` here) and a `TABLE` resource that is created even when its table is missing (`404 NoSuchObject` in the cloud) - with what each measurement did and did not cover, and correct `docs/protocol.md`, which still said the service's HTTP status had not been read back and named `InvalidParameter` where the emulator answers `ResourceAlreadyExists`. No behavior changed.
 
 ## 1.2.0 — 2026-10-13

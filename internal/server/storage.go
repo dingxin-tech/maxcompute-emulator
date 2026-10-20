@@ -39,6 +39,9 @@ type storageSession struct {
 	Part                                                        map[string]string
 	Streams                                                     map[string]*storageStream
 	Bytes                                                       int64
+	Incremental                                                 bool
+	LatestVersion, IncStart                                     int64
+	IncMode                                                     string
 }
 type storageRequest struct {
 	ArrowOptions                                                                            struct{ TimestampUnit, DatetimeUnit string }
@@ -50,7 +53,11 @@ type storageRequest struct {
 	RequiredDataColumns, RequiredPartitionColumns, RequiredPartitions, DataColumns, Columns []string
 	FilterPredicate                                                                         string
 	IncrementalRead                                                                         bool
-	SplitOptions                                                                            struct {
+	IncrementalReadOptions                                                                  struct {
+		StartVersion, EndVersion                       int64
+		StartTimeStamp, EndTimeStamp, Mode, StartTxnId string
+	}
+	SplitOptions struct {
 		SplitMode                  string
 		SplitNumber                int64
 		CrossPartition, BucketSort bool
@@ -143,10 +150,43 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 		} else {
 			key = v.ID
 		}
+		incremental := req.IncrementalRead || q.Get("session_type") == "incremental_read"
+		incMode, incStart, incEnd := "", int64(-1), int64(-1)
 		if action == "TableCreateReadSession" || action == "TablePreview" {
-			if req.IncrementalRead || req.FilterPredicate != "" {
-				bad(400, "UnsupportedOperation", fmt.Errorf("incremental/filter reads are not implemented"))
+			if req.FilterPredicate != "" {
+				bad(400, "UnsupportedOperation", fmt.Errorf("filter predicate pushdown is not implemented"))
 				return
+			}
+			if incremental {
+				if action == "TablePreview" {
+					bad(400, "InvalidParameter", fmt.Errorf("preview is not an incremental read"))
+					return
+				}
+				// Same gate and same shape as the service: ACID tables only, and every
+				// unsupported window form fails instead of quietly reading the table.
+				if !meta.IsDelta() {
+					bad(405, "MethodNotAllowed", fmt.Errorf("Only ACID table support incremental read"))
+					return
+				}
+				incMode = strings.ToLower(req.IncrementalReadOptions.Mode)
+				if incMode == "" {
+					incMode = "append"
+				}
+				if incMode != "append" && incMode != "cdc" {
+					bad(400, "InvalidParameter", fmt.Errorf("unknown incremental read mode %s", req.IncrementalReadOptions.Mode))
+					return
+				}
+				for _, stamp := range []string{req.IncrementalReadOptions.StartTimeStamp, req.IncrementalReadOptions.EndTimeStamp} {
+					if stamp != "" && stamp != "-1" {
+						bad(405, "MethodNotAllowed", fmt.Errorf("incremental timestamp windows are not implemented"))
+						return
+					}
+				}
+				if req.IncrementalReadOptions.StartTxnId != "" {
+					bad(405, "MethodNotAllowed", fmt.Errorf("incremental transaction ids are not implemented"))
+					return
+				}
+				incStart, incEnd = req.IncrementalReadOptions.StartVersion, req.IncrementalReadOptions.EndVersion
 			}
 			filters := []map[string]string{}
 			if action == "TablePreview" && req.Partition != "" {
@@ -160,22 +200,47 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 				}
 				filters = append(filters, part)
 			}
-			v.Data, v.Meta, err = s.Engine.SnapshotStorage(r.Context(), p, sc, t, filters)
-			if err != nil {
-				bad(400, "InvalidParameter", err)
-				return
-			}
-			names := req.RequiredDataColumns
-			if len(names) == 0 {
-				for _, c := range meta.Columns {
-					names = append(names, c.Name)
+			if incremental {
+				data, version, e := s.Engine.DeltaRead(r.Context(), p, sc, t, filters, incStart, incEnd, incMode == "cdc")
+				if e != nil {
+					bad(400, "InvalidParameter", e)
+					return
 				}
-			}
-			names = append(names, req.RequiredPartitionColumns...)
-			v.Data, err = projectResult(v.Data, names)
-			if err != nil {
-				bad(400, "InvalidParameter", err)
-				return
+				v.Data, v.Meta = data, meta
+				v.Incremental, v.LatestVersion, v.IncStart, v.IncMode = true, version, max(incStart, 0), incMode
+				names := req.RequiredDataColumns
+				if len(names) == 0 {
+					for _, c := range meta.Columns {
+						names = append(names, c.Name)
+					}
+				}
+				// The event columns sit between data and partition columns, which is the
+				// order consumers concatenate out of DataSchema/SystemColumns/PartitionColumns.
+				names = append(names, engine.MetaOpColumn, engine.MetaTSColumn)
+				names = append(names, req.RequiredPartitionColumns...)
+				v.Data, err = projectResult(v.Data, names)
+				if err != nil {
+					bad(400, "InvalidParameter", err)
+					return
+				}
+			} else {
+				v.Data, v.Meta, err = s.Engine.SnapshotStorage(r.Context(), p, sc, t, filters)
+				if err != nil {
+					bad(400, "InvalidParameter", err)
+					return
+				}
+				names := req.RequiredDataColumns
+				if len(names) == 0 {
+					for _, c := range meta.Columns {
+						names = append(names, c.Name)
+					}
+				}
+				names = append(names, req.RequiredPartitionColumns...)
+				v.Data, err = projectResult(v.Data, names)
+				if err != nil {
+					bad(400, "InvalidParameter", err)
+					return
+				}
 			}
 			for _, unit := range []string{req.ArrowOptions.TimestampUnit, req.ArrowOptions.DatetimeUnit} {
 				if unit != "" && unit != "second" && unit != "milli" && unit != "micro" && unit != "nano" {
@@ -188,7 +253,7 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 			if req.SplitOptions.SplitMode != "" {
 				v.SplitMode = req.SplitOptions.SplitMode
 			}
-			if v.SplitMode == "Bucket" || (v.SplitMode == "Parallelism" && req.SplitOptions.SplitNumber != 1) || (strings.HasPrefix(r.URL.Path, "/api/storage/v1/") && req.SplitOptions.CrossPartition) || req.SplitOptions.BucketSort {
+			if v.SplitMode == "Bucket" || (v.SplitMode == "Parallelism" && req.SplitOptions.SplitNumber != 1) || req.SplitOptions.BucketSort {
 				bad(400, "UnsupportedOperation", fmt.Errorf("requested split planning is not implemented"))
 				return
 			}
@@ -237,7 +302,18 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 			bad(409, "InvalidState", fmt.Errorf("not a read session"))
 			return
 		}
-		jsonResponse(w, 200, map[string]any{"SessionId": v.ID, "ExpirationTime": v.Created.Add(s.cfg.SessionTTL).Unix(), "RecordCount": len(v.Data.Rows), "SessionStatus": "NORMAL", "SessionType": "Read", "DataSchema": readSchema(v.Data.Columns), "TableSchema": writeSchema(v.Data.Columns), "SplitMode": v.SplitMode, "SplitsCount": 1, "SplitBucketId": []int{0}, "SupportedDataFormat": []any{map[string]string{"Type": "Arrow", "Version": "V5"}}, "SessionStats": map[string]any{}})
+		resp := map[string]any{"SessionId": v.ID, "ExpirationTime": v.Created.Add(s.cfg.SessionTTL).Unix(), "RecordCount": len(v.Data.Rows), "SessionStatus": "NORMAL", "SessionType": "Read", "DataSchema": readSchema(v.Data.Columns), "TableSchema": writeSchema(v.Data.Columns), "SplitMode": v.SplitMode, "SplitsCount": 1, "SplitBucketId": []int{0}, "SupportedDataFormat": []any{map[string]string{"Type": "Arrow", "Version": "V5"}}, "SessionStats": map[string]any{}}
+		if v.Incremental {
+			// Consumers take the version to advance from LatestVersion; without it an
+			// incremental reader cannot move its cursor at all.
+			resp["DataSchema"] = deltaSchema(v.Data.Columns, v.Meta.Partitions)
+			resp["LatestVersion"] = v.LatestVersion
+			// LatestTxnId is published as the empty string the live service returns, so a
+			// consumer that carries it straight back as StartTxnId sees the same shape either way.
+			resp["LatestTxnId"] = ""
+			resp["IncrementalReadOptions"] = map[string]any{"StartVersion": v.IncStart, "EndVersion": v.LatestVersion, "Mode": v.IncMode}
+		}
+		jsonResponse(w, 200, resp)
 	case "TableRead", "TablePreview":
 		if v.Mode != "Read" {
 			bad(409, "InvalidState", fmt.Errorf("not a read session"))
@@ -268,7 +344,7 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 		count = min(count, int64(len(v.Data.Rows))-offset)
 		data := v.Data
 		data.Rows = data.Rows[offset : offset+count]
-		data, err = projectResult(data, req.DataColumns)
+		data, err = projectResult(data, withEventColumns(req.DataColumns, v.Incremental))
 		if err != nil {
 			bad(400, "InvalidParameter", err)
 			return
@@ -467,6 +543,27 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 		bad(404, "UnsupportedOperation", fmt.Errorf("unsupported storage action %s", action))
 	}
 }
+
+// withEventColumns keeps the incremental event columns when a reader projects
+// specific data columns; dropping them would make a CDC row indistinguishable.
+func withEventColumns(names []string, incremental bool) []string {
+	if !incremental || len(names) == 0 {
+		return names
+	}
+	for _, meta := range []string{engine.MetaOpColumn, engine.MetaTSColumn} {
+		found := false
+		for _, n := range names {
+			if strings.EqualFold(n, meta) {
+				found = true
+			}
+		}
+		if !found {
+			names = append(names, meta)
+		}
+	}
+	return names
+}
+
 func projectResult(data engine.Result, names []string) (engine.Result, error) {
 	if len(names) == 0 {
 		return data, nil

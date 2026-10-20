@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -66,6 +67,14 @@ func (e *Engine) WriteMutationsExpected(ctx context.Context, p, s, name, expecte
 	if len(where) > 0 {
 		filter = " WHERE " + strings.Join(where, " AND ")
 	}
+	delta := t.IsDelta()
+	if delta && overwrite {
+		// Rows an overwrite drops would otherwise vanish without an event, leaving a
+		// later incremental window with a silent hole where the replaced rows were.
+		if err = logDeltaRemovedRows(ctx, tx, t, strings.Join(where, " AND "), partArgs, deltaOpDelete); err != nil {
+			return err
+		}
+	}
 	// Capture catalog and data partitions before mutations can remove the final row.
 	if len(t.Partitions) > 0 {
 		t.EmptyPartitions, err = partitionList(ctx, tx, t)
@@ -96,6 +105,8 @@ func (e *Engine) WriteMutationsExpected(ctx context.Context, p, s, name, expecte
 	}
 	columns := append(append([]Column{}, t.Columns...), t.Partitions...)
 	for i, row := range rows {
+		opValue := deltaOpInsert
+		logWhere, logArgs := "", []any{}
 		if len(row) != len(t.Columns)+len(dynamic) {
 			return fmt.Errorf("column count mismatch")
 		}
@@ -112,37 +123,65 @@ func (e *Engine) WriteMutationsExpected(ctx context.Context, p, s, name, expecte
 			if ops[i] != 'U' && ops[i] != 'D' {
 				return fmt.Errorf("invalid upsert operation")
 			}
-			if partial != nil && i < len(partial) && len(partial[i]) > 0 && ops[i] == 'U' {
-				assignments := []string{}
-				values := []any{}
-				seen := map[int]bool{}
-				for _, idx := range partial[i] {
-					if idx < 0 || idx >= len(t.Columns) || seen[idx] {
-						return fmt.Errorf("invalid partial update column")
+			if delta {
+				// Read the image first: the service emits UPDATE_BEFORE/UPDATE_AFTER (or
+				// DELETE) as separate events, and the replacement row must keep a version.
+				whereSQL := strings.Join(preds, " AND ")
+				old, e := readStoredRow(ctx, tx, t, whereSQL, args)
+				if e != nil {
+					return e
+				}
+				if _, e = tx.ExecContext(ctx, "DELETE FROM "+Quote(name)+" WHERE "+whereSQL, args...); e != nil {
+					return e
+				}
+				if old != nil {
+					if e = insertDeltaRow(ctx, tx, t, old, DeltaBeforeOp(ops[i])); e != nil {
+						return e
 					}
-					seen[idx] = true
-					c := t.Columns[idx]
-					expr, bound := bindExpression(c.Parsed, row[idx])
-					assignments = append(assignments, Quote(c.Name)+"="+expr)
-					values = append(values, bound...)
 				}
-				result, er := tx.ExecContext(ctx, "UPDATE "+Quote(name)+" SET "+strings.Join(assignments, ",")+" WHERE "+strings.Join(preds, " AND "), append(values, args...)...)
-				if er != nil {
-					return er
-				}
-				updated, er := result.RowsAffected()
-				if er != nil {
-					return er
-				}
-				if updated > 0 {
+				if ops[i] == 'D' {
 					continue
 				}
-			}
-			if _, err = tx.ExecContext(ctx, "DELETE FROM "+Quote(name)+" WHERE "+strings.Join(preds, " AND "), args...); err != nil {
-				return err
-			}
-			if ops[i] == 'D' {
-				continue
+				opValue = DeltaOpOf(ops[i], old != nil)
+				logWhere, logArgs = whereSQL, args
+				if partial != nil && i < len(partial) && len(partial[i]) > 0 {
+					// An unmentioned column keeps its stored value, so the after-image is
+					// the merged row rather than the sparse request.
+					row = MergePartial(row, old, partial[i], len(t.Columns))
+				}
+			} else {
+				if partial != nil && i < len(partial) && len(partial[i]) > 0 && ops[i] == 'U' {
+					assignments := []string{}
+					values := []any{}
+					seen := map[int]bool{}
+					for _, idx := range partial[i] {
+						if idx < 0 || idx >= len(t.Columns) || seen[idx] {
+							return fmt.Errorf("invalid partial update column")
+						}
+						seen[idx] = true
+						c := t.Columns[idx]
+						expr, bound := bindExpression(c.Parsed, row[idx])
+						assignments = append(assignments, Quote(c.Name)+"="+expr)
+						values = append(values, bound...)
+					}
+					result, er := tx.ExecContext(ctx, "UPDATE "+Quote(name)+" SET "+strings.Join(assignments, ",")+" WHERE "+strings.Join(preds, " AND "), append(values, args...)...)
+					if er != nil {
+						return er
+					}
+					updated, er := result.RowsAffected()
+					if er != nil {
+						return er
+					}
+					if updated > 0 {
+						continue
+					}
+				}
+				if _, err = tx.ExecContext(ctx, "DELETE FROM "+Quote(name)+" WHERE "+strings.Join(preds, " AND "), args...); err != nil {
+					return err
+				}
+				if ops[i] == 'D' {
+					continue
+				}
 			}
 		}
 		values := append([]any{}, row[:len(t.Columns)]...)
@@ -165,9 +204,24 @@ func (e *Engine) WriteMutationsExpected(ctx context.Context, p, s, name, expecte
 			placeholders = append(placeholders, expr)
 			args = append(args, bound...)
 		}
-		insert := "INSERT INTO " + Quote(name) + " VALUES (" + strings.Join(placeholders, ",") + ")"
+		insert := "INSERT INTO " + Quote(name)
+		if delta {
+			// Hidden version columns keep their defaults; the event code is explicit.
+			list := append(append([]string{}, t.DeltaColumnNames()...), Quote(DeltaOpColumn))
+			insert += " (" + strings.Join(list, ",") + ")"
+			placeholders = append(placeholders, strconv.Itoa(opValue))
+		}
+		insert += " VALUES (" + strings.Join(placeholders, ",") + ")"
 		if _, err = tx.ExecContext(ctx, insert, args...); err != nil {
 			return err
+		}
+		if logWhere != "" {
+			// Log per row: the before-image of the next row may already carry a newer
+			// version, so a batch-wide "log everything above the last version" would
+			// drop the rows written in between.
+			if err = logDeltaRows(ctx, tx, t, logWhere, logArgs); err != nil {
+				return err
+			}
 		}
 	}
 	if len(t.Partitions) > 0 {

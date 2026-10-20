@@ -132,6 +132,13 @@ func (e *Engine) alterMetadata(ctx context.Context, tx *sql.Tx, ns string, ts []
 			where = append(where, Quote(c.Name)+"=CAST(? AS "+c.Parsed.Duck()+")")
 			args = append(args, part[c.Name])
 		}
+		if t.IsDelta() {
+			// Dropping a partition removes rows; the events have to be published first
+			// or an incremental reader never learns the rows went away.
+			if err = logDeltaRemovedRows(ctx, tx, t, strings.Join(where, " AND "), args, deltaOpDelete); err != nil {
+				return err
+			}
+		}
 		if _, err = tx.ExecContext(ctx, "DELETE FROM "+Quote(t.Name)+" WHERE "+strings.Join(where, " AND "), args...); err != nil {
 			return err
 		}
