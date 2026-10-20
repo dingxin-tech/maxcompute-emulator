@@ -143,7 +143,7 @@ func odpsparserParserInit() {
 		"BigintLiteral", "SmallintLiteral", "TinyintLiteral", "DecimalLiteral",
 		"ByteLengthLiteral", "Number", "Variable", "IDENTIFIER_TOKEN", "QuotedIdentifier",
 		"CharSetStringLiteral", "WS", "COMMENT", "HintStart", "ESCAPE", "AT",
-		"UNDERLINE", "ANY_CHAR",
+		"UNDERLINE", "ANY_CHAR", "BlockComment",
 	}
 	staticData.RuleNames = []string{
 		"script", "userCodeBlock", "statement", "compoundStatement", "noopStatement",
@@ -288,7 +288,7 @@ func odpsparserParserInit() {
 	}
 	staticData.PredictionContextCache = antlr.NewPredictionContextCache()
 	staticData.serializedATN = []int32{
-		4, 1, 441, 6649, 2, 0, 7, 0, 2, 1, 7, 1, 2, 2, 7, 2, 2, 3, 7, 3, 2, 4,
+		4, 1, 442, 6649, 2, 0, 7, 0, 2, 1, 7, 1, 2, 2, 7, 2, 2, 3, 7, 3, 2, 4,
 		7, 4, 2, 5, 7, 5, 2, 6, 7, 6, 2, 7, 7, 7, 2, 8, 7, 8, 2, 9, 7, 9, 2, 10,
 		7, 10, 2, 11, 7, 11, 2, 12, 7, 12, 2, 13, 7, 13, 2, 14, 7, 14, 2, 15, 7,
 		15, 2, 16, 7, 16, 2, 17, 7, 17, 2, 18, 7, 18, 2, 19, 7, 19, 2, 20, 7, 20,
@@ -4231,6 +4231,7 @@ const (
 	OdpsParserAT                       = 439
 	OdpsParserUNDERLINE                = 440
 	OdpsParserANY_CHAR                 = 441
+	OdpsParserBlockComment             = 442
 )
 
 // OdpsParser rules.
@@ -25016,7 +25017,7 @@ func (p *OdpsParser) AnythingButEqualOrSemi() (localctx IAnythingButEqualOrSemiC
 	}
 	_la = p.GetTokenStream().LA(1)
 
-	for ok := true; ok; ok = ((int64(_la) & ^0x3f) == 0 && ((int64(1)<<_la)&-2) != 0) || ((int64((_la-64)) & ^0x3f) == 0 && ((int64(1)<<(_la-64))&-1) != 0) || ((int64((_la-128)) & ^0x3f) == 0 && ((int64(1)<<(_la-128))&-1) != 0) || ((int64((_la-192)) & ^0x3f) == 0 && ((int64(1)<<(_la-192))&-1) != 0) || ((int64((_la-256)) & ^0x3f) == 0 && ((int64(1)<<(_la-256))&-1) != 0) || ((int64((_la-320)) & ^0x3f) == 0 && ((int64(1)<<(_la-320))&-1) != 0) || ((int64((_la-384)) & ^0x3f) == 0 && ((int64(1)<<(_la-384))&285978576337960447) != 0) {
+	for ok := true; ok; ok = ((int64(_la) & ^0x3f) == 0 && ((int64(1)<<_la)&-2) != 0) || ((int64((_la-64)) & ^0x3f) == 0 && ((int64(1)<<(_la-64))&-1) != 0) || ((int64((_la-128)) & ^0x3f) == 0 && ((int64(1)<<(_la-128))&-1) != 0) || ((int64((_la-192)) & ^0x3f) == 0 && ((int64(1)<<(_la-192))&-1) != 0) || ((int64((_la-256)) & ^0x3f) == 0 && ((int64(1)<<(_la-256))&-1) != 0) || ((int64((_la-320)) & ^0x3f) == 0 && ((int64(1)<<(_la-320))&-1) != 0) || ((int64((_la-384)) & ^0x3f) == 0 && ((int64(1)<<(_la-384))&574208952489672191) != 0) {
 		{
 			p.SetState(1914)
 			_la = p.GetTokenStream().LA(1)

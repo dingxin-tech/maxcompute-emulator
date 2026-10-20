@@ -34,6 +34,8 @@ type Result struct {
 	Bytes   int64
 	Columns []Column
 	Rows    [][]any
+	// SHOW SCHEMAS task text is a raw name list rather than a CSV header plus rows.
+	RawNameList bool `json:"-"`
 }
 
 func ParseType(s string) (Type, error) {

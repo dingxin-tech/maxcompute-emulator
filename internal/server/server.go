@@ -243,7 +243,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "capabilities" {
-		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; get_latest_version; ODPS2 subset", "resources": []string{"file", "jar", "py", "archive", "table-metadata"}, "functions": []string{"java-udf-metadata", "sql-function-metadata", "embedded-function-metadata"}, "mcqa": []string{"sqlrt-session", "subquery-query", "subquery-result", "subquery-cancel", "session-stop", "subquery-instance-tunnel", "session-select-only"}, "storage_incremental_read": []string{"version-range", "append", "cdc"}, "unsupported": []string{"volume-resources", "sql-udf-execution", "volumes", "mcqa-named-session-attach", "mcqa-v2-maxqa", "catalogapi", "incremental-timestamp-window", "incremental-txn-id", "filter-predicate-pushdown"}, "auth": s.authDescription(), "test_faults": s.cfg.TestMode, "quotas": append([]string{"default"}, s.cfg.Quotas...)})
+		jsonResponse(w, 200, map[string]any{"version": Version, "tunnel_download": []string{"create", "reload", "protobuf", "arrow", "complete"}, "compression": []string{"identity", "deflate", "zstd", "lz4_frame"}, "storage_v2": true, "storage_paths": []string{"/api/storage/v2", "/api/storage/v3"}, "tunnel_upload": []string{"protobuf", "arrow", "blocks", "stream", "upsert"}, "storage_write_modes": []string{"Batch", "BatchCompatible", "Streaming", "StreamingRealtime"}, "sql": "CREATE/DROP/INSERT/SELECT; static partitions; get_latest_version; ODPS2 subset", "schemas": []string{"create", "get", "list", "delete-cascade"}, "resources": []string{"file", "jar", "py", "archive", "table-metadata"}, "functions": []string{"java-udf-metadata", "sql-function-metadata", "embedded-function-metadata"}, "mcqa": []string{"sqlrt-session", "subquery-query", "subquery-result", "subquery-cancel", "session-stop", "subquery-instance-tunnel", "session-select-only"}, "storage_incremental_read": []string{"version-range", "append", "cdc"}, "unsupported": []string{"volume-resources", "sql-udf-execution", "volumes", "mcqa-named-session-attach", "mcqa-v2-maxqa", "catalogapi", "incremental-timestamp-window", "incremental-txn-id", "filter-predicate-pushdown"}, "auth": s.authDescription(), "test_faults": s.cfg.TestMode, "quotas": append([]string{"default"}, s.cfg.Quotas...)})
 		return
 	}
 	if path == "logview/host" {
@@ -266,14 +266,29 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !s.beforeProjectRequest(w, r) {
 		return
 	}
-	schema := r.URL.Query().Get("curr_schema")
+	schema := strings.ToLower(r.URL.Query().Get("curr_schema"))
 	if schema == "" {
 		schema = "default"
 	}
 	rest := parts[2:]
+	if len(rest) >= 1 && rest[0] == "schemas" && len(rest) <= 2 {
+		s.schemas(w, r, project, rest[1:])
+		return
+	}
 	if len(rest) >= 2 && rest[0] == "schemas" {
-		schema = rest[1]
+		schema = strings.ToLower(rest[1])
 		rest = rest[2:]
+	}
+	if len(rest) > 0 && (rest[0] == "tables" || rest[0] == "resources" || rest[0] == "registration" || (rest[0] == "instances" && len(rest) == 1 && r.Method == "POST")) {
+		exists, err := s.Engine.HasSchema(ctx, project, schema)
+		if err != nil {
+			fail(w, r, 500, "InternalError", err)
+			return
+		}
+		if !exists {
+			fail(w, r, 404, "NoSuchObject", engine.ErrSchemaMissing)
+			return
+		}
 	}
 	if len(rest) == 0 && r.Method == "GET" {
 		w.Header().Set("x-odps-owner", "emulator")
@@ -439,7 +454,7 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 			var b bytes.Buffer
 			cw := csv.NewWriter(&b)
 			// SQLTask.getResult consumes the first CSV record as column names.
-			if len(res.Columns) > 0 {
+			if len(res.Columns) > 0 && !res.RawNameList {
 				header := make([]string, len(res.Columns))
 				for n, c := range res.Columns {
 					header[n] = c.Name

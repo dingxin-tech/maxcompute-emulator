@@ -208,49 +208,50 @@ func (e *Engine) Partitions(ctx context.Context, p, s, name string) ([]map[strin
 	return partitionList(ctx, tx, t)
 }
 
-// SDK DDL uses project.schema.table; only the selected namespace is accepted.
-func localQualifiedNames(ts []string, p, s string) []string {
+// SDK DDL may name a managed schema explicitly within the selected project.
+func localQualifiedNames(ts []string, p, s string) ([]string, string) {
 	if len(ts) < 3 {
-		return ts
+		return ts, s
 	}
 	pos := 2
 	switch word(ts[0]) {
 	case "create":
 		if word(ts[1]) != "table" {
-			return ts
+			return ts, s
 		}
 		if word(ts[pos]) == "if" {
 			pos += 3
 		}
 	case "drop":
 		if word(ts[1]) != "table" {
-			return ts
+			return ts, s
 		}
 		if word(ts[pos]) == "if" {
 			pos += 2
 		}
 	case "alter", "truncate":
 		if word(ts[1]) != "table" {
-			return ts
+			return ts, s
 		}
 	case "insert":
 		if word(ts[pos]) == "table" {
 			pos++
 		}
 	default:
-		return ts
+		return ts, s
 	}
 	skip := 0
-	if pos+4 < len(ts) && word(ts[pos]) == word(p) && ts[pos+1] == "." && word(ts[pos+2]) == word(s) && ts[pos+3] == "." {
+	if pos+4 < len(ts) && word(ts[pos]) == word(p) && ts[pos+1] == "." && ts[pos+3] == "." {
+		s = word(ts[pos+2])
 		skip = 4
 	} else if s == "default" && pos+2 < len(ts) && word(ts[pos]) == word(p) && ts[pos+1] == "." && (pos+3 >= len(ts) || ts[pos+3] != ".") {
 		skip = 2
 	}
 	if skip == 0 {
-		return ts
+		return ts, s
 	}
 	out := append([]string{}, ts[:pos]...)
-	return append(out, ts[pos+skip:]...)
+	return append(out, ts[pos+skip:]...), s
 }
 
 func saveTable(ctx context.Context, tx *sql.Tx, ns string, t Table) error {

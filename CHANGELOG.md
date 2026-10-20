@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Accept ordinary block comments in SQL, including long comments within the SQL byte limit, while preserving string literal contents and optimizer-hint tokens.
+- Validate SQL without retaining an unused parse tree, share one validation budget across execution and SQLRT admission, and reuse executed result formatting instead of reparsing every result. Include concurrent token-heavy regressions and a long-IN-list allocation benchmark.
+- Execute JDBC typed numeric literals (`L`, `Y`, `S`, `BD`, `F`) with their declared types, decimal precision and range checks, including signed minimum integers. Add engine and published-driver regressions; strings and quoted identifiers remain unchanged.
+- Translate nested query result types to ODPS ARRAY/MAP/STRUCT metadata before serving Tunnel results.
+- Add persistent managed Schema create/get/list/delete APIs with project isolation, prefix/paginated listing, idempotent deletion and cascade removal of managed objects.
+
 - Answer `SELECT get_latest_version('<project>[.<schema>].<table>')` in the SQL plane. It is
   the poll a delta source makes before it plans a CDC window, so it now returns the same
   number an incremental session reports as `LatestVersion` - including zero for an empty

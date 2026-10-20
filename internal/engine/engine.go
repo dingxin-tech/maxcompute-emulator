@@ -26,7 +26,7 @@ func Open(path string, maxRows int) (*Engine, error) {
 		return nil, e
 	}
 	db.SetMaxOpenConns(1)
-	for _, q := range []string{"SET memory_limit='512MB'", "SET threads=2", "SET enable_external_access=false", "CREATE TABLE IF NOT EXISTS main.emulator_projects(name VARCHAR PRIMARY KEY)", "CREATE TABLE IF NOT EXISTS main.emulator_catalog(namespace VARCHAR, name VARCHAR, definition VARCHAR, PRIMARY KEY(namespace,name))", "CREATE TABLE IF NOT EXISTS main.emulator_resources(namespace VARCHAR, name VARCHAR, size BIGINT, definition VARCHAR, content BLOB, PRIMARY KEY(namespace,name))", "CREATE TABLE IF NOT EXISTS main.emulator_functions(namespace VARCHAR, name VARCHAR, definition VARCHAR, PRIMARY KEY(namespace,name))"} {
+	for _, q := range []string{"SET memory_limit='512MB'", "SET threads=2", "SET enable_external_access=false", "CREATE TABLE IF NOT EXISTS main.emulator_projects(name VARCHAR PRIMARY KEY)", "CREATE TABLE IF NOT EXISTS main.emulator_schemas(project VARCHAR, name VARCHAR, comment VARCHAR, created BIGINT, PRIMARY KEY(project,name))", "CREATE TABLE IF NOT EXISTS main.emulator_catalog(namespace VARCHAR, name VARCHAR, definition VARCHAR, PRIMARY KEY(namespace,name))", "CREATE TABLE IF NOT EXISTS main.emulator_resources(namespace VARCHAR, name VARCHAR, size BIGINT, definition VARCHAR, content BLOB, PRIMARY KEY(namespace,name))", "CREATE TABLE IF NOT EXISTS main.emulator_functions(namespace VARCHAR, name VARCHAR, definition VARCHAR, PRIMARY KEY(namespace,name))"} {
 		if _, e = db.Exec(q); e != nil {
 			db.Close()
 			return nil, e
@@ -40,6 +40,7 @@ func Open(path string, maxRows int) (*Engine, error) {
 }
 func (e *Engine) Close() error { return e.db.Close() }
 func namespace(p, s string) string {
+	s = strings.ToLower(s)
 	x := sha256.Sum256([]byte(p + "\x00" + s))
 	return "n_" + hex.EncodeToString(x[:12])
 }
@@ -47,6 +48,10 @@ func (e *Engine) transaction(ctx context.Context, p, s string) (*sql.Tx, string,
 	ns := namespace(p, s)
 	tx, err := e.db.BeginTx(ctx, nil)
 	if err != nil {
+		return nil, ns, err
+	}
+	if err = requireSchema(ctx, tx, p, s); err != nil {
+		tx.Rollback()
 		return nil, ns, err
 	}
 	if _, err = tx.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS "+Quote(ns)); err == nil {
@@ -96,6 +101,9 @@ func (e *Engine) Table(ctx context.Context, p, s, n string) (Table, error) {
 func (e *Engine) Tables(ctx context.Context, p, s string) ([]Table, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if err := requireSchema(ctx, e.db, p, s); err != nil {
+		return nil, err
+	}
 	rows, err := e.db.QueryContext(ctx, "SELECT definition FROM main.emulator_catalog WHERE namespace=? ORDER BY name", namespace(p, s))
 	if err != nil {
 		return nil, err
@@ -116,21 +124,48 @@ func (e *Engine) Tables(ctx context.Context, p, s string) ([]Table, error) {
 	return out, rows.Err()
 }
 func (e *Engine) Execute(ctx context.Context, p, s, sqlText string) (Result, error) {
+	s = strings.ToLower(s)
+	// This engine already has one execution connection. Include syntax validation
+	// in that budget so concurrent long SQL cannot build many parser contexts at once.
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	stmts, err := Lex(sqlText)
 	if err != nil {
 		return Result{}, err
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	tx, ns, err := e.transaction(ctx, p, s)
 	if err != nil {
 		return Result{}, err
 	}
 	defer tx.Rollback()
 	var result Result
+	activeNamespace := ns
 	for _, ts := range stmts {
-		ts = localQualifiedNames(ts, p, s)
-		result, err = e.exec(ctx, tx, ns, ts)
+		local, selected := localQualifiedNames(ts, p, s)
+		selectedNS := namespace(p, selected)
+		if err = requireSchema(ctx, tx, p, selected); err != nil {
+			return Result{}, err
+		}
+		if selected != s && len(local) > 0 && word(local[0]) == "insert" {
+			for _, token := range local {
+				if strings.EqualFold(token, "select") || strings.EqualFold(token, "with") {
+					return Result{}, fmt.Errorf("UnsupportedFeature: cross-schema INSERT SELECT")
+				}
+			}
+		}
+		if activeNamespace != selectedNS {
+			if _, err = tx.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS "+Quote(selectedNS)); err != nil {
+				return Result{}, err
+			}
+			if _, err = tx.ExecContext(ctx, "SET schema = '"+selectedNS+"'"); err != nil {
+				return Result{}, err
+			}
+			activeNamespace = selectedNS
+		}
+		result, err = e.exec(ctx, tx, selectedNS, p, local)
 		if err != nil {
 			return Result{}, err
 		}
@@ -140,7 +175,7 @@ func (e *Engine) Execute(ctx context.Context, p, s, sqlText string) (Result, err
 	}
 	return result, tx.Commit()
 }
-func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (Result, error) {
+func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns, project string, ts []string) (Result, error) {
 	none := Result{}
 	if len(ts) == 0 {
 		return none, nil
@@ -156,6 +191,26 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns string, ts []string) (
 		}
 	}
 	switch word(ts[0]) {
+	case "show":
+		if len(ts) >= 2 && word(ts[1]) == "schemas" && (len(ts) == 2 || (len(ts) == 4 && word(ts[2]) == "in")) {
+			selected := project
+			if len(ts) == 4 {
+				selected = word(ts[3])
+			}
+			if selected != project {
+				var count int
+				if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM main.emulator_projects WHERE name=?", selected).Scan(&count); err != nil {
+					return none, err
+				}
+				if count == 0 {
+					return none, fmt.Errorf("ODPS-0420111: project does not exist")
+				}
+			}
+			result, err := e.query(ctx, tx, "SELECT name AS schema_name FROM main.emulator_schemas WHERE project=? UNION ALL SELECT 'default' ORDER BY schema_name", selected)
+			result.RawNameList = true
+			return result, err
+		}
+		return none, fmt.Errorf("UnsupportedFeature: SHOW statement")
 	case "set":
 		if len(ts) >= 3 && strings.ToLower(strings.Join(ts[1:], "")) == "odps.sql.type.system.odps2=true" {
 			return none, nil
@@ -508,20 +563,13 @@ func (e *Engine) query(ctx context.Context, tx *sql.Tx, q string, args ...any) (
 			continue
 		}
 		keep = append(keep, i)
-		typ := strings.ToLower(c.DatabaseTypeName())
-		switch typ {
-		case "varchar":
-			typ = "string"
-		case "integer":
-			typ = "int"
-		case "timestamp_ms":
-			typ = "datetime"
-		case "timestamp_ns":
-			typ = "timestamp"
+		typ, err := resultType(c.DatabaseTypeName())
+		if err != nil {
+			return Result{}, err
 		}
 		col, e := NewColumn(c.Name(), typ)
 		if e != nil {
-			col = Column{Name: c.Name(), Type: typ}
+			return Result{}, e
 		}
 		r.Columns = append(r.Columns, col)
 	}

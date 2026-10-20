@@ -46,15 +46,18 @@ func TestOverwriteSelfAndUnsupported(t *testing.T) {
 	}
 	defer e.Close()
 	ctx := context.Background()
-	if _, err = e.Execute(ctx, "p", "s", "create table t(id bigint);insert into t values(1);insert overwrite table t select id+1 from t;"); err != nil {
+	if err = e.CreateSchema(ctx, "p", "test_schema", "", false); err != nil {
 		t.Fatal(err)
 	}
-	r, _, err := e.Snapshot(ctx, "p", "s", "t", nil)
+	if _, err = e.Execute(ctx, "p", "test_schema", "create table t(id bigint);insert into t values(1);insert overwrite table t select id+1 from t;"); err != nil {
+		t.Fatal(err)
+	}
+	r, _, err := e.Snapshot(ctx, "p", "test_schema", "t", nil)
 	if err != nil || r.Rows[0][0] != int64(2) {
 		t.Fatal(r, err)
 	}
 	for _, q := range []string{"select * from read_csv('/etc/passwd')", "select from ;", "set threads=999;"} {
-		if _, err = e.Execute(ctx, "p", "s", q); err == nil {
+		if _, err = e.Execute(ctx, "p", "test_schema", q); err == nil {
 			t.Fatal(q)
 		}
 	}
@@ -67,7 +70,10 @@ func TestPersistenceAndReservedNamespaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if _, err = e.Execute(ctx, "p", "s", "create table t(id bigint); insert into t values(42)"); err != nil {
+	if err = e.CreateSchema(ctx, "p", "test_schema", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.Execute(ctx, "p", "test_schema", "create table t(id bigint); insert into t values(42)"); err != nil {
 		t.Fatal(err)
 	}
 	if err = e.Close(); err != nil {
@@ -78,12 +84,12 @@ func TestPersistenceAndReservedNamespaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Close()
-	r, _, err := e.Snapshot(ctx, "p", "s", "t", nil)
+	r, _, err := e.Snapshot(ctx, "p", "test_schema", "t", nil)
 	if err != nil || r.Rows[0][0] != int64(42) {
 		t.Fatal(r, err)
 	}
 	for _, q := range []string{"select * from main.emulator_catalog", "select * from information_schema.tables", "select * from duckdb_tables()", "select * from query('select 1')"} {
-		if _, err = e.Execute(ctx, "p", "s", q); err == nil {
+		if _, err = e.Execute(ctx, "p", "test_schema", q); err == nil {
 			t.Fatal("reserved access accepted:", q)
 		}
 	}

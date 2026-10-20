@@ -32,6 +32,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from contextlib import contextmanager
 
 from odps import ODPS, options
@@ -39,7 +40,7 @@ from odps import ODPS, options
 ENDPOINT = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8080").rstrip("/")
 PROJECT = sys.argv[2] if len(sys.argv) > 2 else "test_project"
 PREFIX = "pyodps_probe"
-SCHEMA = "probe_schema"
+SCHEMA = PREFIX + "_schema_" + uuid.uuid4().hex[:12]
 CHUNK = 1024
 
 passed, failed = [], []
@@ -159,6 +160,11 @@ def cleanup():
                 pass
 
 
+case("create managed schema fixture", lambda: raw(
+    "/projects/%s/schemas" % PROJECT, method="POST",
+    body=("<Schema><Name>%s</Name></Schema>" % SCHEMA).encode(),
+    headers={"Content-Type": "application/xml"},
+)[0])
 cleanup()
 
 # --- 1. single payload, the shape the Java SDK never sends -------------------
@@ -601,6 +607,9 @@ def exists_relies_on_404():
 case("exists() distinguishes present from absent", exists_relies_on_404)
 
 cleanup()
+case("delete managed schema fixture", lambda: raw(
+    "/projects/%s/schemas/%s" % (PROJECT, SCHEMA), method="DELETE",
+)[0])
 print("---- pyodps contract probe: %d passed, %d failed" % (len(passed), len(failed)))
 for name, detail in failed:
     print("FAILED %s :: %s" % (name, detail[:220].replace("\n", " ")))
