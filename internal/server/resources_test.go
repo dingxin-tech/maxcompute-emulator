@@ -182,7 +182,7 @@ func TestResourceRESTContract(t *testing.T) {
 	}
 	// A mismatching digest must not publish a partial payload, and the merge consumes the
 	// chunk it assembled from. That matches the live service: a refused digest leaves both
-	// part resources gone (measured on three_pangu2_odps2, 2026-10-04 19:23), which is what
+	// part resources gone (measured on a live test project, 2026-10-04 19:23), which is what
 	// makes the retry-cost note in resources.go worth reading before changing this.
 	for _, body := range []string{md5hex("nope") + "|" + partB, "0123456789abcdef0123456789abcdef|" + partB} {
 		resourceRequest(t, s, "POST", "/projects/p/resources?rIsPart=true", partB, "file", temp, "x")
