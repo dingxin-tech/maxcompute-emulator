@@ -112,7 +112,7 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 		mode = "Batch"
 	}
 	if mode != "Batch" && mode != "BatchCompatible" && mode != "Streaming" && mode != "StreamingRealtime" {
-		bad(400, "UnsupportedOperation", fmt.Errorf("unsupported WriteMode %s", mode))
+		bad(405, "MethodNotAllowed", fmt.Errorf("unsupported WriteMode %s", mode))
 		return
 	}
 	key := sid
@@ -154,7 +154,7 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 		incMode, incStart, incEnd := "", int64(-1), int64(-1)
 		if action == "TableCreateReadSession" || action == "TablePreview" {
 			if req.FilterPredicate != "" {
-				bad(400, "UnsupportedOperation", fmt.Errorf("filter predicate pushdown is not implemented"))
+				bad(405, "MethodNotAllowed", fmt.Errorf("filter predicate pushdown is not implemented"))
 				return
 			}
 			if incremental {
@@ -254,7 +254,7 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 				v.SplitMode = req.SplitOptions.SplitMode
 			}
 			if v.SplitMode == "Bucket" || (v.SplitMode == "Parallelism" && req.SplitOptions.SplitNumber != 1) || req.SplitOptions.BucketSort {
-				bad(400, "UnsupportedOperation", fmt.Errorf("requested split planning is not implemented"))
+				bad(405, "MethodNotAllowed", fmt.Errorf("requested split planning is not implemented"))
 				return
 			}
 			if v.SplitMode != "Size" && v.SplitMode != "RowOffset" && v.SplitMode != "Parallelism" && v.SplitMode != "Bucket" {

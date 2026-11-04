@@ -20,7 +20,10 @@ surfaces, because every read is answered with one logical split that already spa
 the selected partitions. Incremental reads are supported on
 ACID tables over a version window (`append` and `cdc`, with `__meta_op_type`/
 `__meta_timestamp` events and `LatestVersion`), while timestamp windows and
-transaction-id resume fail with the service's `405 MethodNotAllowed`. A single logical
+transaction-id resume fail with the service's `405 MethodNotAllowed`; the same status now covers
+every storage-face refusal of a capability we do not provide (unknown write mode, filter pushdown,
+physical split planning, unsupported codec or Arrow format/version, zero batch size), unified on
+2026-11-04, while malformed or out-of-range values keep `400 InvalidParameter`. A single logical
 snapshot does not model physical service splits or distributed scheduling.
 
 ## Schema and metadata

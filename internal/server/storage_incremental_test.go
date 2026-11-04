@@ -240,7 +240,9 @@ func TestStorageV1IncrementalWindowAdvances(t *testing.T) {
 }
 
 // TestStorageV1IncrementalRejectsUnsupportedForms keeps the declared gaps loud: a
-// timestamp window, a transaction id or an unknown mode must fail, not read the table.
+// A timestamp window or a transaction id is a capability the emulator does not give,
+// so it fails 405; an unknown mode or an inverted window is a bad value, so it fails 400.
+// Either way the request must fail instead of quietly reading the table.
 func TestStorageV1IncrementalRejectsUnsupportedForms(t *testing.T) {
 	s, h := fixture(t, Config{})
 	createAcidTable(t, s, "acidr", 1, 1)
@@ -253,7 +255,7 @@ func TestStorageV1IncrementalRejectsUnsupportedForms(t *testing.T) {
 		{"txn id", `{"IncrementalReadOptions":{"StartVersion":0,"EndVersion":-1,"Mode":"append","StartTxnId":"12"}}`, http.StatusMethodNotAllowed},
 		{"unknown mode", `{"IncrementalReadOptions":{"StartVersion":0,"EndVersion":-1,"Mode":"merge"}}`, http.StatusBadRequest},
 		{"inverted range", `{"IncrementalReadOptions":{"StartVersion":5,"EndVersion":1,"Mode":"append"}}`, http.StatusBadRequest},
-		{"filter pushdown", `{"FilterPredicate":"id=1","IncrementalReadOptions":{"StartVersion":0,"EndVersion":-1,"Mode":"append"}}`, http.StatusBadRequest},
+		{"filter pushdown", `{"FilterPredicate":"id=1","IncrementalReadOptions":{"StartVersion":0,"EndVersion":-1,"Mode":"append"}}`, http.StatusMethodNotAllowed},
 	}
 	for _, tc := range cases {
 		code, body, sid := openSession(t, h, v1Path("acidr", "/sessions?session_type=incremental_read"), tc.body)

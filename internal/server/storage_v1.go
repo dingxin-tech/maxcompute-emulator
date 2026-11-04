@@ -11,6 +11,12 @@ import (
 	"strings"
 )
 
+// Refusal contract on the storage surface (unified by the maintainer on 2026-11-04):
+// a capability the emulator does not provide answers 405/MethodNotAllowed - that covers
+// unsupported codecs, formats and format versions, zero batch size, unimplemented split
+// planning, unknown write modes, filter pushdown and the incremental forms below - while a
+// value that is malformed or out of range stays 400/InvalidParameter (row ranges, batch
+// size bounds, unknown split modes, unknown session types, column projection misuse).
 // storageV1 implements the public table-api batch read session and data routes.
 // The wire contract is distinct from action-based Storage v2; snapshots are shared.
 func (s *Server) storageV1(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +64,7 @@ func (s *Server) storageV1(w http.ResponseWriter, r *http.Request) {
 		switch r.Header.Get("Accept-Encoding") {
 		case "", "ZSTD", "LZ4_FRAME":
 		default:
-			fail(w, r, 400, "InvalidParameter", fmt.Errorf("unsupported compression"))
+			fail(w, r, 405, "MethodNotAllowed", fmt.Errorf("unsupported compression"))
 			return
 		}
 		maxBatchRows := int64(4096)
@@ -71,7 +77,7 @@ func (s *Server) storageV1(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if maxBatchRows == 0 {
-			fail(w, r, 400, "UnsupportedOperation", fmt.Errorf("zero batch size is not implemented"))
+			fail(w, r, 405, "MethodNotAllowed", fmt.Errorf("zero batch size is not implemented"))
 			return
 		}
 		sid := q.Get("SessionId")
@@ -126,11 +132,11 @@ func (s *Server) storageV1(w http.ResponseWriter, r *http.Request) {
 			skip = 0
 		}
 		if format := q.Get("data_format_type"); format != "" && !strings.EqualFold(format, "Arrow") {
-			fail(w, r, 400, "InvalidParameter", fmt.Errorf("unsupported format"))
+			fail(w, r, 405, "MethodNotAllowed", fmt.Errorf("unsupported format"))
 			return
 		}
 		if version := q.Get("data_format_version"); version != "" && !strings.EqualFold(version, "V5") {
-			fail(w, r, 400, "InvalidParameter", fmt.Errorf("unsupported format version"))
+			fail(w, r, 405, "MethodNotAllowed", fmt.Errorf("unsupported format version"))
 			return
 		}
 		columns := splitNonEmpty(q.Get("data_columns"))

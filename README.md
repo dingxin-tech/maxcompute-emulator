@@ -114,7 +114,7 @@ A delta source loop closes on one more piece: `SELECT get_latest_version(project
 
 Resource payloads are capped at 64 MiB each and 512 MiB per project/schema. Resource and function names resolve case-insensitively while the uploaded spelling is what listings return. Unsupported operations return errors rather than cloud behavior being assumed.
 
-Four documented differences from the service - the codes a refused chunked merge returns, a `TABLE` resource accepted for a table that does not exist, the extra property a live CDC table demands before it takes an insert, and the split in rejection codes (`405` for the incremental refusals above, `400 UnsupportedOperation` for refusals that predate them) - are listed in [Known divergences from the real service](#known-divergences-from-the-real-service).
+Three documented differences from the service - the codes a refused chunked merge returns, a `TABLE` resource accepted for a table that does not exist, and the extra property a live CDC table demands before it takes an insert - are listed in [Known divergences from the real service](#known-divergences-from-the-real-service).
 
 Flink 1.16.2 standalone bounded uploads were tested with Protobuf/Arrow and ordinary/dynamic-partition tables. Use `sink.standalone.enable=true`. A coordinator-mode bounded input in the tested connector can finish without committing rows; that mode is not certified. Checkpoint recovery and cross-job exactly-once have not been validated.
 
@@ -207,13 +207,20 @@ each, taken through the public table API. They do not derive the rule that separ
 after-image codes, do not cover event ordering across partitions or under concurrent writers, and do
 not exercise the timestamp-window form, which this emulator refuses rather than guesses at.
 
-### 4. Two rejection shapes for operations we do not simulate
+### 4. Two rejection shapes for operations we do not simulate - resolved 2026-11-04
 
-The refusals added with incremental reads answer 405 MethodNotAllowed, the status the
-service uses when an operation does not apply to a table. Refusals that shipped in 1.2.0
-answer 400 UnsupportedOperation. Unifying them changes a published contract that existing
-tests assert on, so both shapes stay until that decision is taken; this row is the note
-that keeps the difference visible.
+This row used to record that the incremental refusals answer 405 MethodNotAllowed while the
+refusals that shipped in 1.2.0 answered 400. The maintainer decided on 2026-11-04 to unify
+the storage face, so every refusal of a capability the emulator does not provide now answers
+405/MethodNotAllowed: unknown `WriteMode`, filter-predicate pushdown, bucket / parallelism /
+bucket-sort split planning, an `Accept-Encoding` codec outside the advertised set,
+`data_format_type` / `data_format_version` outside Arrow V5, and a zero batch size. A value
+that is simply not acceptable stays 400/InvalidParameter - out-of-range row ranges and batch
+sizes, unknown split modes, unknown session types, an unknown incremental mode, an inverted
+version window, or a preview combined with an incremental read. `TestStorageRefusalContract`
+pins both directions so the two classes cannot drift back together. Refusals on other faces
+(Resources, functions, schemas, MCQA, instance and table routes) still answer 400 with
+`UnsupportedOperation`; whether to extend the same rule there is still open.
 
 ### What these readings do not cover
 
@@ -295,7 +302,7 @@ case-insensitive. Unsupported codecs and malformed parameters fail explicitly.
 
 Local snapshots currently use one physical split. Bucket splits, parallelism greater
 than one and zero batch size are not implemented; requests for those capabilities
-return `UnsupportedOperation`. The `CrossPartition` flag is accepted on both surfaces:
+answer `405`/`MethodNotAllowed`. The `CrossPartition` flag is accepted on both surfaces:
 the public table API defaults it to true, and one logical split already spans the
 selected partitions, so refusing it would only block table-api consumers. These limitations must
 not be treated as validation of equivalent distributed-service behavior. Independent

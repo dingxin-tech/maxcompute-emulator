@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -61,21 +62,31 @@ func TestStorageV1BatchSessionContract(t *testing.T) {
 			t.Fatalf("%s: got %d rows, want %d", tc.query, count, tc.rows)
 		}
 	}
+	// A value that is malformed or out of range stays 400; a capability the emulator
+	// does not provide answers 405. The storage-face split was unified by the
+	// maintainer on 2026-11-04 (see TestStorageRefusalContract for the whole rule).
 	for _, query := range []string{
 		"&row_index=2048&row_count=1", "&row_index=-1&row_count=1",
 		"&row_index=0&row_count=-1", "&row_index=0&row_count=1&skip_row_num=-1",
 		"&row_index=0&row_count=1&max_batch_rows=20001",
-		"&row_index=0&row_count=1&data_format_type=protobuf",
-		"&row_index=0&row_count=1&data_format_version=v4",
 	} {
 		code, _, _ := request(t, h, "GET", dataPath+query, "ZSTD")
 		if code != 400 {
-			t.Fatalf("%s: got %d", query, code)
+			t.Fatalf("%s: got %d, want 400", query, code)
 		}
 	}
-	code, _, _ = request(t, h, "GET", dataPath+"&row_index=0&row_count=1", "gzip")
-	if code != 400 {
-		t.Fatal("unsupported compression", code)
+	for _, query := range []string{
+		"&row_index=0&row_count=1&data_format_type=protobuf",
+		"&row_index=0&row_count=1&data_format_version=v4",
+	} {
+		code, _, body := request(t, h, "GET", dataPath+query, "ZSTD")
+		if code != 405 || !strings.Contains(string(body), "MethodNotAllowed") {
+			t.Fatalf("%s: got %d %s, want 405/MethodNotAllowed", query, code, body)
+		}
+	}
+	code, _, body := request(t, h, "GET", dataPath+"&row_index=0&row_count=1", "gzip")
+	if code != 405 {
+		t.Fatal("unsupported compression", code, string(body))
 	}
 	for _, url := range []string{
 		"/api/storage/v1/projects/p/schemas/default/tables/t/data?session_id=missing",
@@ -156,8 +167,8 @@ func TestStorageReadPlanningProtocolBoundary(t *testing.T) {
 			t.Fatal(err)
 		}
 		resp.Body.Close()
-		if resp.StatusCode != 400 {
-			t.Fatalf("unsupported split accepted: %s status %d", split, resp.StatusCode)
+		if resp.StatusCode != 405 {
+			t.Fatalf("unsupported split accepted: %s status %d, want 405", split, resp.StatusCode)
 		}
 	}
 }
