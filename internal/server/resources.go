@@ -240,8 +240,8 @@ func (s *Server) putResourcePart(w http.ResponseWriter, r *http.Request, p, sc, 
 // bytes are both verified before the payload becomes visible.
 //
 // What happens to the part resources is pinned against a live MaxCompute project
-// (three_pangu2_odps2, 2026-10-04 19:23-19:26 CST, temp resources created and deleted by
-// the probe; raw read-backs in the workspace work item evidence):
+// (2026-10-04 19:23-19:26 CST, temp resources created and deleted by the probe):
+// the raw read-backs are not in this repo; the statements below are what they showed:
 //
 //   - a merge that publishes consumes its parts;
 //   - a merge refused because the assembled payload does not match the declared MD5 also
