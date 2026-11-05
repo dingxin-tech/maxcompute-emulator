@@ -18,6 +18,14 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "proxy" {
+		if err := runProxy(os.Args[2:]); err != nil {
+			slog.Error("proxy", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	listen := flag.String("listen", "127.0.0.1:8080", "HTTP listen address")
 	db := flag.String("database", "", "DuckDB file; empty for temporary data")
 	seed := flag.String("seed", "", "ODPS SQL fixture file")
