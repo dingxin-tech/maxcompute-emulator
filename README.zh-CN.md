@@ -35,6 +35,11 @@ docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 \
 
 需要保存表数据时增加 `--database /data/emulator.duckdb`，并将可由 UID 65532 写入的目录或 volume 挂到 `/data`。会话保存在内存，重启后必须重新创建读写会话。重复执行同一 seed 前，应使用幂等 SQL 或重新创建数据目录。
 
+## 观察 SDK 发往真实服务的请求
+
+[请求观测代理](docs/capture-proxy.md) 将请求转发到固定 HTTP(S) 端点，并以 JSON Lines
+记录指定请求头、响应状态和上游 Request ID。把客户端的 endpoint 指向本地代理即可核对实际 HTTP 请求。
+
 ## Java SDK / Testcontainers
 
 依赖与可执行测试位于 [tests/java](tests/java)。使用 JDK 17、Maven、Docker：

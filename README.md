@@ -22,6 +22,12 @@ Use `http://127.0.0.1:8080` for both the ODPS endpoint and Tunnel endpoint, proj
 
 Pin `1.2.0` for reproducible tests. `latest` follows stable releases and may change.
 
+## Inspect SDK requests to a live endpoint
+
+The [capture proxy](docs/capture-proxy.md) forwards requests to a fixed HTTP(S) endpoint and emits
+JSON Lines with selected request headers, response status and the upstream Request ID. Point the
+client at the local proxy endpoint to inspect what its HTTP transport sends.
+
 ## Java SDK and Testcontainers
 
 Use `com.aliyun.odps:odps-sdk-core:0.61.2-public` and Testcontainers. A complete Maven project and 25 acceptance tests are in [tests/java](tests/java).

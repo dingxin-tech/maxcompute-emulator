@@ -1,9 +1,12 @@
 # syntax=docker/dockerfile:1
+FROM golang:1.27.1-bookworm AS toolchain
+
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS runtime
 LABEL org.opencontainers.image.version="1.2.1"
 # The pinned bookworm base already provides libstdc++6 and libgcc_s.
 RUN test -e /usr/lib/$(uname -m)-linux-gnu/libstdc++.so.6 \
     && mkdir /data && chown 65532:65532 /data
+COPY --from=toolchain /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY LICENSE NOTICE docs/third-party-licenses.txt /usr/share/licenses/emulator/
 COPY examples/seed.sql examples/types.sql /opt/emulator/
 USER 65532:65532
@@ -16,7 +19,7 @@ CMD ["--listen","0.0.0.0:8080"]
 FROM runtime AS prebuilt
 COPY build/emulator-linux-amd64 /usr/local/bin/emulator
 
-FROM golang:1.27.1-bookworm AS build
+FROM toolchain AS build
 WORKDIR /src
 ARG GOPROXY=https://proxy.golang.org,direct
 COPY go.mod go.sum ./
