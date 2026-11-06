@@ -14,8 +14,16 @@ projection, and batch sizes from 1 to 20000. Arrow timestamps retain second,
 millisecond, microsecond or nanosecond units, including nested values. ZSTD and
 LZ4_FRAME use Arrow IPC buffer compression.
 
-Physical bucket/parallelism splitting, cross-partition v1 planning, v1 writes and
-incremental/CDC reads remain unsupported and fail explicitly. A single logical
+Physical bucket/parallelism splitting, bucket sort and v1 write sessions remain
+unsupported and fail explicitly. The `CrossPartition` flag is accepted on both
+surfaces, because every read is answered with one logical split that already spans
+the selected partitions. Incremental reads are supported on
+ACID tables over a version window (`append` and `cdc`, with `__meta_op_type`/
+`__meta_timestamp` events and `LatestVersion`), while timestamp windows and
+transaction-id resume fail with the service's `405 MethodNotAllowed`; the same status now covers
+every storage-face refusal of a capability we do not provide (unknown write mode, filter pushdown,
+physical split planning, unsupported codec or Arrow format/version, zero batch size), unified on
+2026-11-04, while malformed or out-of-range values keep `400 InvalidParameter`. A single logical
 snapshot does not model physical service splits or distributed scheduling.
 
 ## Schema and metadata
@@ -56,6 +64,10 @@ These results used local image
 it is not a published registry digest. Archive clean logs and source manifests with
 new runs. See [build](build.md) and [fault controls](reliability.md).
 
-Production IAM/quota/throughput, CDC/DLMV, cross-node recovery and physical split
-planning need separate real-service acceptance. Transfer sessions and retry history
+Production IAM/quota/throughput, DLMV, cross-node recovery and physical split
+planning need separate real-service acceptance. The CDC event codes, the shape of an `append` window, the version
+advance and the read-schema field order were measured against a live project on
+2026-10-14 and the emulator was aligned to what came back; what that run did not
+settle is the rule separating the two update-after codes, and event ordering under
+concurrent writers or across partitions. Transfer sessions and retry history
 remain process-local across Emulator restarts.

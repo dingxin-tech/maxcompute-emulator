@@ -43,6 +43,9 @@
       <activation><activeByDefault>true</activeByDefault></activation>
       <dependencies>
         <dependency><groupId>com.aliyun.odps</groupId><artifactId>odps-sdk-storage-api</artifactId><version>0.61.2-public</version></dependency>
+        <!-- The engine-facing table API is what Flink/Spark connectors build their
+             incremental reads on, so the emulator is tested against it too. -->
+        <dependency><groupId>com.aliyun.odps</groupId><artifactId>odps-sdk-table-api</artifactId><version>0.61.2-public</version></dependency>
       </dependencies>
     </profile>
     <!-- Compile only the offline API regression against SeaTunnel's legacy SDK. -->
