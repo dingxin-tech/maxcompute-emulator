@@ -224,6 +224,16 @@ func (e *Engine) WriteMutationsExpected(ctx context.Context, p, s, name, expecte
 			}
 		}
 	}
+	if delta && ops == nil {
+		// Ordinary write paths - a Tunnel block/stream commit and a Storage batch commit
+		// both arrive with ops == nil - carry no per-row predicate, so publish every row
+		// this transaction has not logged yet, exactly as the SQL INSERT path does.
+		// Without this the live row advanced the version bound while a CDC read of the
+		// same window came back empty.
+		if err = logDeltaNewRows(ctx, tx, t); err != nil {
+			return err
+		}
+	}
 	if len(t.Partitions) > 0 {
 		// Merge newly written dynamic partitions using the database-cast values.
 		t.EmptyPartitions, err = partitionList(ctx, tx, t)

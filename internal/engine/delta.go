@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -77,11 +78,19 @@ func createDeltaObjects(ctx context.Context, tx *sql.Tx, t Table, plain []string
 	if _, err := tx.ExecContext(ctx, "CREATE SEQUENCE "+t.DeltaSequence()); err != nil {
 		return err
 	}
+	return createDeltaLogTable(ctx, tx, t, plain)
+}
+
+// createDeltaLogTable builds the append-only event history beside a delta table.
+func createDeltaLogTable(ctx context.Context, tx *sql.Tx, t Table, plain []string) error {
+	if _, err := tx.ExecContext(ctx, "CREATE SEQUENCE IF NOT EXISTS "+t.DeltaSequence()); err != nil {
+		return err
+	}
 	defs := append(append([]string{}, plain...),
 		Quote(DeltaLSNColumn)+" BIGINT",
 		Quote(DeltaOpColumn)+" TINYINT",
 		Quote(DeltaTSColumn)+" TIMESTAMP")
-	_, err := tx.ExecContext(ctx, "CREATE TABLE "+Quote(t.DeltaLog())+" ("+strings.Join(defs, ",")+")")
+	_, err := tx.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS "+Quote(t.DeltaLog())+" ("+strings.Join(defs, ",")+")")
 	return err
 }
 
@@ -359,4 +368,163 @@ func MergePartial(row, old []any, provided []int, dataColumns int) []any {
 		}
 	}
 	return out
+}
+
+// upgradeDeltaTables repairs persisted ACID tables that predate the version objects.
+// Table.IsDelta() reads the catalog, so a transactional table stored by an older release
+// is already treated as a delta table, while its hidden columns, sequence and history
+// table were only ever built by the CREATE path - ordinary writes, TRUNCATE and
+// incremental reads would then fail on missing columns or a missing table.
+//
+// Explicit initial-history contract: rows that existed before the upgrade become the
+// baseline snapshot at version 1, published as insert events, so no consumer is silently
+// told the table was empty; the first write after the upgrade takes version 2 and lands
+// in the next window. Nothing is invented for changes that happened before the upgrade.
+func upgradeDeltaTables(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query("SELECT namespace,name,definition FROM main.emulator_catalog")
+	if err != nil {
+		return err
+	}
+	type pending struct {
+		ns string
+		t  Table
+	}
+	list := []pending{}
+	for rows.Next() {
+		var ns, name, raw string
+		if err = rows.Scan(&ns, &name, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		var t Table
+		if err = json.Unmarshal([]byte(raw), &t); err != nil {
+			rows.Close()
+			return err
+		}
+		if t.IsDelta() && t.ID != "" {
+			list = append(list, pending{ns, t})
+		}
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, item := range list {
+		if err = upgradeDeltaTable(tx, item.ns, item.t); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// upgradeDeltaTable brings one persisted delta table to the current physical layout.
+func upgradeDeltaTable(tx *sql.Tx, ns string, t Table) error {
+	var hidden int
+	if err := tx.QueryRow("SELECT count(*) FROM information_schema.columns WHERE table_schema=? AND table_name=? AND column_name=?",
+		ns, t.Name, DeltaLSNColumn).Scan(&hidden); err != nil {
+		return err
+	}
+	var logs int
+	if err := tx.QueryRow("SELECT count(*) FROM information_schema.tables WHERE table_schema=? AND table_name=?",
+		ns, t.DeltaLog()).Scan(&logs); err != nil {
+		return err
+	}
+	if hidden > 0 && logs > 0 {
+		return nil
+	}
+	qual := Quote(ns) + "." + Quote(t.Name)
+	if hidden == 0 {
+		for _, def := range []string{Quote(DeltaLSNColumn) + " BIGINT", Quote(DeltaOpColumn) + " TINYINT", Quote(DeltaTSColumn) + " TIMESTAMP"} {
+			if _, err := tx.Exec("ALTER TABLE " + qual + " ADD COLUMN " + def); err != nil {
+				return err
+			}
+		}
+		var live int
+		if err := tx.QueryRow("SELECT count(*) FROM " + qual).Scan(&live); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("UPDATE " + qual + " SET " + Quote(DeltaLSNColumn) + "=1, " + Quote(DeltaOpColumn) + "=" +
+			strconv.Itoa(deltaOpInsert) + ", " + Quote(DeltaTSColumn) + "=current_timestamp WHERE " +
+			Quote(DeltaLSNColumn) + " IS NULL"); err != nil {
+			return err
+		}
+		// The sequence has to hand out 2 and up once a baseline occupies 1.
+		start := "1"
+		if live > 0 {
+			start = "2"
+		}
+		if _, err := tx.Exec("CREATE SEQUENCE IF NOT EXISTS " + t.DeltaSequence() + " START WITH " + start); err != nil {
+			return err
+		}
+		for _, def := range []string{
+			Quote(DeltaLSNColumn) + " SET DEFAULT nextval('" + t.DeltaSequence() + "')",
+			Quote(DeltaOpColumn) + " SET DEFAULT " + strconv.Itoa(deltaOpInsert),
+			Quote(DeltaTSColumn) + " SET DEFAULT current_timestamp",
+		} {
+			if _, err := tx.Exec("ALTER TABLE " + qual + " ALTER COLUMN " + def); err != nil {
+				return err
+			}
+		}
+	} else if _, err := tx.Exec("CREATE SEQUENCE IF NOT EXISTS " + t.DeltaSequence()); err != nil {
+		return err
+	}
+	// The catalog definition is a user-visible shape and does not carry the physical
+	// DuckDB types, so the history table is derived from the table as stored.
+	names, decls, err := physicalColumns(tx, ns, t.Name)
+	if err != nil {
+		return err
+	}
+	plain := decls
+	if logs == 0 {
+		if _, err := tx.Exec("CREATE SCHEMA IF NOT EXISTS " + Quote(ns)); err != nil {
+			return err
+		}
+		defs := append(append([]string{}, plain...),
+			Quote(DeltaLSNColumn)+" BIGINT", Quote(DeltaOpColumn)+" TINYINT", Quote(DeltaTSColumn)+" TIMESTAMP")
+		if _, err := tx.Exec("CREATE TABLE IF NOT EXISTS " + Quote(ns) + "." + Quote(t.DeltaLog()) +
+			" (" + strings.Join(defs, ",") + ")"); err != nil {
+			return err
+		}
+		// Publish the baseline exactly once, carrying each row's own version.
+		cols := []string{}
+		for _, n := range names {
+			cols = append(cols, Quote(n))
+		}
+		if _, err := tx.Exec("INSERT INTO " + Quote(ns) + "." + Quote(t.DeltaLog()) + " SELECT " +
+			strings.Join(cols, ",") + ", " + Quote(DeltaLSNColumn) + ", " + Quote(DeltaOpColumn) + ", " +
+			Quote(DeltaTSColumn) + " FROM " + qual + " WHERE " + Quote(DeltaLSNColumn) +
+			" NOT IN (SELECT " + Quote(DeltaLSNColumn) + " FROM " + Quote(ns) + "." + Quote(t.DeltaLog()) + ")"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// physicalColumns lists a stored table's user-visible columns with their physical
+// DuckDB declarations, skipping the hidden version columns.
+func physicalColumns(tx *sql.Tx, ns, name string) ([]string, []string, error) {
+	rows, err := tx.Query("SELECT column_name, data_type FROM information_schema.columns WHERE table_schema=? AND table_name=? ORDER BY ordinal_position", ns, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	names, decls := []string{}, []string{}
+	for rows.Next() {
+		var col, typ string
+		if err = rows.Scan(&col, &typ); err != nil {
+			return nil, nil, err
+		}
+		if IsHiddenColumn(col) {
+			continue
+		}
+		names = append(names, col)
+		decls = append(decls, Quote(col)+" "+typ)
+	}
+	return names, decls, rows.Err()
 }

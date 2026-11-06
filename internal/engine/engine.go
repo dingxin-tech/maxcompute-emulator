@@ -36,6 +36,12 @@ func Open(path string, maxRows int) (*Engine, error) {
 		db.Close()
 		return nil, e
 	}
+	// Persisted ACID tables may predate the version objects; repair them before any
+	// statement can reach a missing column or history table.
+	if e = upgradeDeltaTables(db); e != nil {
+		db.Close()
+		return nil, e
+	}
 	return &Engine{db: db, maxRows: maxRows}, nil
 }
 func (e *Engine) Close() error { return e.db.Close() }
