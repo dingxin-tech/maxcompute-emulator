@@ -446,6 +446,11 @@ func (e *Engine) exec(ctx context.Context, tx *sql.Tx, ns, project string, ts []
 		if word(ts[pos]) != "values" && word(ts[pos]) != "select" && word(ts[pos]) != "with" {
 			return none, fmt.Errorf("UnsupportedFeature: INSERT source")
 		}
+		// A set operation has to be projected before the relations meet, not cleaned up after:
+		// the stage runs the whole source in one statement.
+		if source, err = setOperationSource(ctx, tx, ns, ts[pos:]); err != nil {
+			return none, err
+		}
 		table.EmptyPartitions, err = partitionList(ctx, tx, table)
 		if err != nil {
 			return none, err

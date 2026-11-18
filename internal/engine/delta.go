@@ -208,6 +208,189 @@ func dropStageHiddenColumns(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
+// setOperationSource rewrites the INSERT source so hidden version columns never take part in a
+// set operation. CREATE TEMP TABLE ... AS <source> runs the whole source at once, and UNION /
+// INTERSECT / EXCEPT compare entire rows: with the version columns still in the projection the
+// relations deduplicate on them (two identical user rows at different versions answer two rows)
+// or the branches stop matching on width. Dropping the columns after the stage exists cannot
+// undo that, so each star is replaced here by the referenced table's visible columns, before the
+// relations meet. A star that cannot be attributed to exactly one plain relation - a join, a
+// subquery, a CTE body - is refused instead of answered, because a wrong row count is worse than
+// a missing capability.
+func setOperationSource(ctx context.Context, tx *sql.Tx, ns string, ts []string) (string, error) {
+	if !hasSetOperator(ts) || !hasStarProjection(ts) {
+		return render(ts), nil
+	}
+	segments, ops := splitSetOperators(ts)
+	out := make([][]string, len(segments))
+	deltas := 0
+	for i, seg := range segments {
+		out[i] = seg
+		// Only sources that actually read a delta table are touched: a plain-to-plain set
+		// operation has no hidden columns and keeps the behaviour it always had.
+		for _, name := range relationNames(seg) {
+			if tbl, err := load(ctx, tx, ns, name); err == nil && tbl.IsDelta() {
+				deltas++
+			}
+		}
+	}
+	if deltas == 0 {
+		return render(ts), nil
+	}
+	for i, seg := range segments {
+		if !hasStarProjection(seg) {
+			continue
+		}
+		rel, ok := starRelation(seg)
+		if !ok {
+			return "", fmt.Errorf("UnsupportedFeature: INSERT source projects a star through a set "+
+				"operation over %s; only SELECT * FROM <table> branches can be projected without the "+
+				"version columns", render(seg))
+		}
+		tbl, err := load(ctx, tx, ns, rel)
+		if err != nil {
+			return "", fmt.Errorf("UnsupportedFeature: INSERT source star branch reads unknown relation %s", rel)
+		}
+		rewritten := []string{}
+		for _, tok := range seg {
+			if isStarToken(tok) {
+				rewritten = append(rewritten, strings.Join(quoteNames(storedColumns(tbl)), ","))
+				continue
+			}
+			rewritten = append(rewritten, tok)
+		}
+		out[i] = rewritten
+	}
+	joined := []string{}
+	for i, seg := range out {
+		joined = append(joined, seg...)
+		if i < len(ops) {
+			joined = append(joined, ops[i]...)
+		}
+	}
+	return render(joined), nil
+}
+
+// isStarToken reports a projection star, bare or qualified (t.*).
+func isStarToken(tok string) bool {
+	w := word(tok)
+	return w == "*" || strings.HasSuffix(w, ".*")
+}
+
+// hasStarProjection scans a token list for any projection star.
+func hasStarProjection(ts []string) bool {
+	for _, tok := range ts {
+		if isStarToken(tok) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasSetOperator reports a set keyword at parenthesis depth zero.
+func hasSetOperator(ts []string) bool {
+	depth := 0
+	for _, tok := range ts {
+		switch word(tok) {
+		case "(":
+			depth++
+		case ")":
+			if depth > 0 {
+				depth--
+			}
+		case "union", "intersect", "except", "minus":
+			if depth == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// splitSetOperators cuts a token list at every depth-zero set keyword and returns the segments
+// plus the operator tokens that join them, so a rebuilt source keeps UNION ALL versus UNION.
+func splitSetOperators(ts []string) ([][]string, [][]string) {
+	segments := [][]string{}
+	ops := [][]string{}
+	cur := []string{}
+	depth := 0
+	for i := 0; i < len(ts); i++ {
+		w := word(ts[i])
+		if w == "(" {
+			depth++
+		}
+		if w == ")" && depth > 0 {
+			depth--
+		}
+		if depth == 0 && (w == "union" || w == "intersect" || w == "except" || w == "minus") {
+			op := []string{ts[i]}
+			if w == "union" && i+1 < len(ts) && word(ts[i+1]) == "all" {
+				op = append(op, ts[i+1])
+				i++
+			}
+			segments = append(segments, cur)
+			ops = append(ops, op)
+			cur = []string{}
+			continue
+		}
+		cur = append(cur, ts[i])
+	}
+	segments = append(segments, cur)
+	return segments, ops
+}
+
+// relationNames lists the identifiers that follow FROM or JOIN in one segment.
+func relationNames(seg []string) []string {
+	names := []string{}
+	for i := 0; i+1 < len(seg); i++ {
+		if word(seg[i]) == "from" || word(seg[i]) == "join" {
+			names = append(names, word(seg[i+1]))
+		}
+	}
+	return names
+}
+
+// starRelation accepts only a segment shaped as SELECT [*|DISTINCT|ALL] * FROM <one name>,
+// optionally followed by ORDER BY or LIMIT, and returns that name. A qualified star has to name
+// the same relation. Anything else is not projectable.
+func starRelation(seg []string) (string, bool) {
+	i := 0
+	if i >= len(seg) || word(seg[i]) != "select" {
+		return "", false
+	}
+	i++
+	for i < len(seg) && (word(seg[i]) == "distinct" || word(seg[i]) == "all") {
+		i++
+	}
+	if i >= len(seg) || !isStarToken(seg[i]) {
+		return "", false
+	}
+	star := word(seg[i])
+	i++
+	if i >= len(seg) || word(seg[i]) != "from" {
+		return "", false
+	}
+	i++
+	if i >= len(seg) {
+		return "", false
+	}
+	name := word(seg[i])
+	i++
+	if star != "*" && strings.TrimSuffix(star, ".*") != name {
+		return "", false
+	}
+	for ; i < len(seg); i++ {
+		if w := word(seg[i]); w != "order" && w != "by" && w != "limit" && w != "offset" && w != "asc" && w != "desc" {
+			// a digit or placeholder after LIMIT/OFFSET is fine, anything else is not
+			if _, err := strconv.Atoi(strings.Trim(seg[i], "'")); err == nil {
+				continue
+			}
+			return "", false
+		}
+	}
+	return name, true
+}
+
 // DeltaBound is the newest version the table has reached across the event log and the
 // live rows. Rollbacks leave holes in the sequence and deletes remove the newest live
 // row, so neither the sequence value nor the data table alone is a monotone bound.
