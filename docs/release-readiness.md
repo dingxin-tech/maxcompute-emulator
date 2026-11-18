@@ -47,3 +47,12 @@
 ## 发布验证
 
 版本 tag 工作流执行 Go race/vet、Linux 源码镜像构建与 Java SDK Testcontainers；推送 Docker Hub 的版本标签后显式拉取并再次执行 SDK 测试，通过后更新 latest 和 GitHub Release。执行状态以对应 Actions run 为准。
+
+### 旧版本持久化文件的升级复验
+
+`./scripts/cross-version-upgrade.sh <old-ref>` 用**旧版本自己编出来的二进制**建 transactional 表并写数，正常关停后由当前构建把同一个
+DuckDB 文件重复打开三次，逐次断言：初始历史只发布一次、回报版本不回退、重启后的新写入仍能从上一轮交出的游标续读。
+仓库内的 `internal/engine/delta_upgrade_test.go` 是用当前代码复现旧布局并重启三次，两者互补：脚本证明的是真旧文件，
+测试保证后续改动不再破坏它。默认需要本机 Go；只有 Docker 时用
+`DOCKER_IMAGE=golang:1.27.1-bookworm GO_MOD_CACHE=<模块缓存> ./scripts/cross-version-upgrade.sh v1.1.0`。
+断言不成立 rc=1，任何一次取数失败 rc=3（绝不当作通过）。这一步不进 CI（要两次构建与两个版本的二进制），属发布前手工复验。

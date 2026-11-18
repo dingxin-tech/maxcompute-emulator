@@ -31,6 +31,12 @@
   code string stays `InvalidParameter` deliberately: that is the invalid-value family across the storage face
   (79 non-test uses; `InvalidArgument` appears nowhere here), and moving one cell onto the service's code would
   split it. A consumer branching on the code string instead of the status will see this one difference.
+- `INSERT ... SELECT` whose source is a set operation over a delta table is projected before the relations meet. The staging
+  snapshot runs the whole source in one statement, so `UNION`/`INTERSECT`/`EXCEPT` would otherwise compare rows that still carry
+  the hidden version columns - the same user row committed at two versions answered two rows - or stop on the width difference
+  before any cleanup could run. Each `SELECT * FROM <table>` branch is rewritten onto that table's declared columns; a star that
+  cannot be attributed to a single relation (a join or a subquery inside the set operation) is refused with `UnsupportedFeature`
+  instead of answered, and a source with no delta table keeps the behaviour it always had.
 - `INSERT ... SELECT *` reading a delta table no longer fails with a column count mismatch: the staging
   snapshot an INSERT takes keeps the hidden version columns out of the projection, so a copy into another
   ACID table and an `INSERT OVERWRITE TABLE` onto itself both work, and every copied row takes its own
