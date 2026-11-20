@@ -94,8 +94,13 @@ assert its returned values, retry budget, cancellation and finalization counts.
 
 `default` always exists. `--quotas named,other` configures additional names.
 Missing named quotas return 404 `QuotaNotExist`. Router replies retain their
-plain endpoint body, adding `x-odps-tunnel-quota-name`. Table download create and
-reload return `QuotaName`; a session retains its original effective quota.
+plain endpoint body, adding `x-odps-tunnel-quota-name`. Named quota discovery
+returns an endpoint under `/__quota/<name>`. The endpoint carries the quota for
+subsequent requests without changing their signed resource path. Use `quota`
+for Storage discovery and `quotaName` for legacy Tunnel discovery. Conflicting
+explicit names return 400 `InvalidParameter`. Storage V2 sessions and legacy table
+download and upload sessions retain their original quota. Table download create
+and reload return `QuotaName`.
 A fault match may include `"quota":"named"` for a bounded 429/FlowExceeded test.
 This does not model production throughput scheduling or regional quota setup.
 
@@ -134,6 +139,21 @@ grant. Project-wide metadata access requires a project-wide grant. Health probes
 This is a deterministic ACL fixture, not RAM policy evaluation or real STS
 validation. Keep real MaxCompute authentication and quota gates.
 
+### Temporary credential rotation
+
+With both `--test-mode` and strict authentication enabled, a configured
+test principal can sign `POST /__test/sts?ttl_seconds=8`. The response supplies
+an opaque `path`. Use that path as the credentials-go `credentials_uri` URL.
+An unsigned `GET` to the URL returns synthetic `AccessKeyId`, `AccessKeySecret`,
+`SecurityToken` and `Expiration`. Treat the URL as a test secret. The temporary
+credential inherits the configured principal's project and table grants.
+
+The same configured principal can sign `POST` to the returned path to issue a
+new credential at the same URL and immediately revoke the previous generation.
+`ttl_seconds` accepts 1–300 and defaults to 60. Signed `DELETE` revokes the
+fixture at the end of the test. Use these endpoints on an isolated listener with
+synthetic credentials.
+
 ## Type fixtures
 
 [examples/types.sql](../examples/types.sql), bundled as `/opt/emulator/types.sql`
@@ -151,7 +171,10 @@ boundary as a negative test. Do not infer wire compatibility from SQL alone.
 
 Run Go tests in the Docker build image and Java tests against the candidate
 image as described in [build.md](build.md). `ReliabilityTest` starts its own
-strict-mode Testcontainer. The C++ wire probe accepts `--faults` against a
+strict-mode Testcontainer. `bash tests/go/verify.sh IMAGE [LOCAL_GO_SDK_CHECKOUT]`
+runs the same `database/sql` and resumable Protobuf Tunnel consumer against
+published Go SDK v0.4.26 and, if supplied, a 1.0 SDK checkout. The C++ wire probe
+accepts `--faults` against a
 separate test-mode container; it verifies that corrupted Arrow streams fail
 and the subsequent normal request succeeds. It is not the complete SDK HTTP
 client or ClickHouse E2E runner.

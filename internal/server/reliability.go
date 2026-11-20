@@ -23,22 +23,25 @@ type requestTrace struct {
 	// Plane separates the Tunnel data plane ("tunnel") from the REST metadata
 	// plane ("rest": resources, registration/functions). Object is the metadata
 	// collection the request addresses and is empty on the Tunnel plane.
-	Plane        string `json:"plane,omitempty"`
-	Object       string `json:"object,omitempty"`
-	DownloadHash string `json:"download_id_hash"`
-	Project      string `json:"project"`
-	Table        string `json:"table"`
-	Partition    bool   `json:"partition_present"`
-	Start        uint64 `json:"start"`
-	Count        uint64 `json:"count"`
-	Columns      int    `json:"columns_count"`
-	Format       string `json:"format"`
-	Compression  string `json:"compression"`
-	Status       int    `json:"status"`
-	ErrorCode    string `json:"error_code,omitempty"`
-	Elapsed      int64  `json:"elapsed_ms"`
-	Quota        string `json:"quota"`
-	fault        *FaultEffect
+	Plane            string `json:"plane,omitempty"`
+	Object           string `json:"object,omitempty"`
+	DownloadHash     string `json:"download_id_hash"`
+	Project          string `json:"project"`
+	Table            string `json:"table"`
+	Partition        bool   `json:"partition_present"`
+	Start            uint64 `json:"start"`
+	Count            uint64 `json:"count"`
+	Columns          int    `json:"columns_count"`
+	Format           string `json:"format"`
+	Compression      string `json:"compression"`
+	Status           int    `json:"status"`
+	ErrorCode        string `json:"error_code,omitempty"`
+	Elapsed          int64  `json:"elapsed_ms"`
+	Quota            string `json:"quota"`
+	fault            *FaultEffect
+	authenticatedKey string
+	quotaConflict    bool
+	quotaDiscovery   bool
 }
 
 func trace(r *http.Request) *requestTrace {
@@ -55,10 +58,11 @@ func (s *Server) hashSession(v string) string {
 }
 func (s *Server) requestTrace(r *http.Request) *requestTrace {
 	q := r.URL.Query()
-	t := &requestTrace{Status: 200, Format: "protobuf", Compression: "identity", Partition: q.Has("partition"), Quota: q.Get("quotaName")}
+	t := &requestTrace{Status: 200, Format: "protobuf", Compression: "identity", Partition: q.Has("partition")}
 	path := strings.TrimPrefix(r.URL.Path, "/api/")
 	path = strings.Trim(path, "/")
 	parts := strings.Split(path, "/")
+	t.quotaDiscovery = len(parts) == 3 && parts[0] == "projects" && parts[2] == "tunnel"
 	for i := 0; i+1 < len(parts); i++ {
 		if parts[i] == "projects" {
 			t.Project = parts[i+1]
@@ -123,12 +127,12 @@ func (s *Server) requestTrace(r *http.Request) *requestTrace {
 		}
 	}
 	if path == "storage/v2" || path == "storage/v3" {
+		t.Plane, t.Format = "storage", "arrow"
 		actions := map[string]string{"TableCreateWriteSession": "create_session", "TableCreateWriteStream": "create_stream", "TableWrite": "write", "TableCloseWriteStream": "close_stream", "TableCommitWriteSession": "commit"}
 		if action := actions[q.Get("Action")]; action != "" {
 			t.Plane, t.Object, t.Action, t.Format = "storage", "write", action, "arrow"
 		}
 	}
-
 	// Metadata-plane requests are addressed below the project node, with an
 	// optional schema segment: projects/P[/schemas/S]/resources[/NAME] and
 	// projects/P[/schemas/S]/registration/functions[/NAME]. The action is the
@@ -175,17 +179,20 @@ func (s *Server) requestTrace(r *http.Request) *requestTrace {
 		t.Start, _ = strconv.ParseUint(a[0], 10, 64)
 		t.Count, _ = strconv.ParseUint(a[1], 10, 64)
 	}
-	if t.Quota == "" {
-		t.Quota = q.Get("quota_name")
+	t.Quota, t.quotaConflict = requestQuota(r, t.quotaDiscovery)
+	if t.Quota == "" && t.Plane == "tunnel" {
+		s.mu.Lock()
+		if v := s.sessions[q.Get("downloadid")]; v != nil {
+			t.Quota = v.Quota
+		}
+		if v := s.writes[q.Get("uploadid")]; v != nil {
+			t.Quota = v.Quota
+		}
+		if v := s.writes[q.Get("upsertid")]; v != nil {
+			t.Quota = v.Quota
+		}
+		s.mu.Unlock()
 	}
-	if t.Quota == "" {
-		t.Quota = "default"
-	}
-	s.mu.Lock()
-	if v := s.sessions[q.Get("downloadid")]; v != nil {
-		t.Quota = v.Quota
-	}
-	s.mu.Unlock()
 	if t.Quota == "" {
 		t.Quota = "default"
 	}
@@ -458,7 +465,11 @@ func (s *Server) beforeProjectRequest(w http.ResponseWriter, r *http.Request) bo
 	if t == nil {
 		return true
 	}
-	if t.Action != "" && t.Plane == "tunnel" || strings.HasSuffix(r.URL.Path, "/tunnel") {
+	if t.Plane == "tunnel" || t.Plane == "storage" || t.quotaDiscovery {
+		if t.quotaConflict {
+			fail(w, r, 400, "InvalidParameter", fmt.Errorf("conflicting quota names"))
+			return false
+		}
 		found := t.Quota == "default"
 		for _, q := range s.cfg.Quotas {
 			if q == t.Quota {

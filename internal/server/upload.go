@@ -107,7 +107,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, p, sc, t, kind s
 			fail(w, r, 400, "InvalidParameter", fmt.Errorf("Upsert requires PRIMARY KEY"))
 			return
 		}
-		v = &writeSession{ID: id(), Dynamic: dynamic, Project: p, Schema: sc, Table: strings.ToLower(t), Partition: string(normalized), Kind: kind, Status: "normal", Quota: q.Get("quotaName"), Part: part, Meta: meta, Blocks: map[int64]engine.Result{}, BlockCounts: map[int64]int{}, RequestSequence: map[string]int64{}, Created: time.Now(), Requests: map[string][32]byte{}}
+		v = &writeSession{ID: id(), Dynamic: dynamic, Project: p, Schema: sc, Table: strings.ToLower(t), Partition: string(normalized), Kind: kind, Status: "normal", Quota: trace(r).Quota, Part: part, Meta: meta, Blocks: map[int64]engine.Result{}, BlockCounts: map[int64]int{}, RequestSequence: map[string]int64{}, Created: time.Now(), Requests: map[string][32]byte{}}
 		s.mu.Lock()
 		for k, old := range s.writes {
 			if time.Since(old.Created) > s.cfg.SessionTTL {
@@ -130,7 +130,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request, p, sc, t, kind s
 	s.mu.Lock()
 	v = s.writes[sid]
 	s.mu.Unlock()
-	if v == nil || v.Kind != kind || v.Project != p || v.Schema != sc || v.Table != strings.ToLower(t) || (!v.Dynamic && v.Partition != string(normalized)) || time.Since(v.Created) > s.cfg.SessionTTL {
+	if v == nil || v.Kind != kind || v.Project != p || v.Schema != sc || v.Table != strings.ToLower(t) || (!v.Dynamic && v.Partition != string(normalized)) || time.Since(v.Created) > s.cfg.SessionTTL || v.Quota != trace(r).Quota {
 		fail(w, r, 404, "NoSuchUpload", fmt.Errorf("unknown or expired upload"))
 		return
 	}
@@ -311,7 +311,7 @@ func blockIDs(v *writeSession) []int64 {
 func writeJSON(v *writeSession, host string) map[string]any {
 	columns := []any{}
 	for i, c := range v.Meta.Columns {
-		columns = append(columns, map[string]any{"name": c.Name, "type": c.Type, "nullable": c.Nullable, "comment": c.Comment, "column_id": i})
+		columns = append(columns, map[string]any{"name": c.Name, "type": c.Type, "nullable": c.Nullable, "comment": c.Comment, "column_id": strconv.Itoa(i)})
 	}
 	schema := map[string]any{"columns": asArray(columns), "partitionKeys": asArray(v.Meta.Partitions)}
 	if v.Kind == "stream" {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dingxin-tech/maxcompute-emulator/internal/engine"
@@ -70,7 +71,7 @@ func (s *Server) storageInstance(w http.ResponseWriter, r *http.Request, p, iid 
 		}
 		s.mu.Unlock()
 	}
-	if v == nil || v.Project != p || v.Table != "@instance_"+iid || time.Since(v.Created) > s.cfg.SessionTTL {
+	if v == nil || v.Project != p || v.Table != "@instance_"+iid || v.Quota != trace(r).Quota || time.Since(v.Created) > s.cfg.SessionTTL {
 		fail(w, r, 404, "NoSuchSession", fmt.Errorf("unknown instance session"))
 		return
 	}
@@ -85,6 +86,10 @@ func (s *Server) storageInstance(w http.ResponseWriter, r *http.Request, p, iid 
 		}
 		if err == nil && q.Has("Count") {
 			n, err = strconv.ParseInt(q.Get("Count"), 10, 64)
+		}
+		if err == nil && q.Has("Count") && n == 0 && strings.TrimPrefix(r.URL.Path, "/api") == "/storage/v3" {
+			fail(w, r, 400, "ODPS-0420411", fmt.Errorf("Count must be positive"))
+			return
 		}
 		if err != nil || start < 0 || start > int64(len(v.Data.Rows)) || n < 0 {
 			fail(w, r, 400, "InvalidParameter", fmt.Errorf("invalid row range"))

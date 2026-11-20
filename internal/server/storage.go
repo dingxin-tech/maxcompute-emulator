@@ -33,6 +33,7 @@ type storageSession struct {
 	Overwrite                                                   bool
 	mu                                                          sync.Mutex
 	ID, Target, Project, Schema, Table, Mode, Status, SplitMode string
+	Quota                                                       string
 	Created                                                     time.Time
 	Meta                                                        engine.Table
 	Data                                                        engine.Result
@@ -74,6 +75,7 @@ type storageRequest struct {
 func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	action, target := q.Get("Action"), q.Get("Target")
+	v3 := strings.TrimPrefix(r.URL.Path, "/api") == "/storage/v3"
 	bad := func(status int, code string, err error) { fail(w, r, status, code, err) }
 	if r.Method != "POST" && !(r.Method == "GET" && action == "InstanceGetReadSession") {
 		bad(405, "InvalidMethod", fmt.Errorf("expected POST"))
@@ -84,7 +86,7 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 6 && parts[0] == "projects" && parts[2] == "schemas" && parts[4] == "tables" {
 		p, sc, t = parts[1], parts[3], parts[5]
 	} else if len(parts) == 4 && parts[0] == "projects" && parts[2] == "instances" {
-		if !s.checkProject(w, r, parts[1]) {
+		if !s.checkProject(w, r, parts[1]) || !s.beforeProjectRequest(w, r) {
 			return
 		}
 		s.storageInstance(w, r, parts[1], parts[3])
@@ -117,7 +119,7 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	key := sid
 	if sid == "default" {
-		key = target + "/" + mode + "/default"
+		key = target + "/" + mode + "/" + trace(r).Quota + "/default"
 	}
 	create := action == "TableCreateReadSession" || action == "TableCreateWriteSession" || action == "TablePreview"
 	s.mu.Lock()
@@ -144,7 +146,7 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 			bad(400, "InvalidPartition", err)
 			return
 		}
-		v = &storageSession{ID: id(), Target: target, Project: p, Schema: sc, Table: t, Mode: mode, Status: "NORMAL", Created: time.Now(), Meta: meta, Part: part, Overwrite: req.Flags["overwrite"] == "true", Streams: map[string]*storageStream{}, SplitMode: "Size"}
+		v = &storageSession{ID: id(), Target: target, Project: p, Schema: sc, Table: t, Quota: trace(r).Quota, Mode: mode, Status: "NORMAL", Created: time.Now(), Meta: meta, Part: part, Overwrite: req.Flags["overwrite"] == "true", Streams: map[string]*storageStream{}, SplitMode: "Size"}
 		if sid == "default" {
 			v.ID = sid
 		} else {
@@ -282,7 +284,7 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 		}
 	}
-	if v == nil || v.Target != target || time.Since(v.Created) > s.cfg.SessionTTL {
+	if v == nil || v.Target != target || v.Quota != trace(r).Quota || time.Since(v.Created) > s.cfg.SessionTTL {
 		bad(404, "NoSuchSession", fmt.Errorf("unknown or expired session"))
 		return
 	}
@@ -368,7 +370,12 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 		if afterWriteFault(w, r) {
 			return
 		}
-		jsonResponse(w, 200, map[string]any{"SessionId": v.ID, "SessionStatus": v.Status, "Streams": streams, "MinUncommittedStagingId": "0"})
+		reply := map[string]any{"Streams": streams, "MinUncommittedStagingId": "0"}
+		if action != "TableGetWriteSession" || !v3 || mode != "Batch" {
+			reply["SessionId"] = v.ID
+			reply["SessionStatus"] = v.Status
+		}
+		jsonResponse(w, 200, reply)
 	case "TableAbortWriteSession":
 		if v.Status == "COMMITTED" {
 			bad(409, "InvalidState", fmt.Errorf("already committed"))
@@ -405,6 +412,15 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 				}
 				seen[k] = true
 				rows = append(rows, st.Rows...)
+			}
+			// A v3 batch commit on this transactional table shape publishes
+			// every closed stream. Clients must isolate independent commits.
+			if v3 && mode == "Batch" && v.Meta.Properties["transactional"] == "true" && len(v.Meta.PrimaryKeys) == 0 {
+				for k, stream := range v.Streams {
+					if stream.Closed && !seen[k] {
+						rows = append(rows, stream.Rows...)
+					}
+				}
 			}
 			if err := s.writeStorage(r.Context(), v, rows, v.Overwrite); err != nil {
 				bad(400, "InvalidData", err)

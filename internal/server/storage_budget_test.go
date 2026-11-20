@@ -24,7 +24,7 @@ func TestStorageRetryBudgetRejectsNewWriteButAllowsReplay(t *testing.T) {
 	for n := int64(0); n < 10000; n++ {
 		st.Requests[n] = sha256.Sum256(payload)
 	}
-	s.storage["session"] = &storageSession{ID: "session", Target: "projects.p.schemas.default.tables.t", Project: "p", Schema: "default", Table: "t", Meta: meta, Mode: "Streaming", Status: "NORMAL", Created: time.Now(), Streams: map[string]*storageStream{"stream": st}}
+	s.storage["session"] = &storageSession{ID: "session", Target: "projects.p.schemas.default.tables.t", Project: "p", Schema: "default", Table: "t", Meta: meta, Mode: "Streaming", Status: "NORMAL", Quota: "default", Created: time.Now(), Streams: map[string]*storageStream{"stream": st}}
 	path := "/api/storage/v2?Target=projects.p.schemas.default.tables.t&WriteMode=Streaming&Action=TableWrite&SessionId=session&StreamId=stream&StreamVersion=1&Count=1&RowOffset="
 	code, body := sendBody(t, h, "POST", path+"10000", payload, nil)
 	if code != 429 {
@@ -46,7 +46,7 @@ func TestEmptyUpsertPacksCannotGrowStagingWithoutLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := &writeSession{ID: "upsert", Project: "p", Schema: "default", Table: "t", Partition: "{}", Kind: "upsert", Status: "normal", Meta: meta, Created: time.Now(), Sequence: 1024, Blocks: map[int64]engine.Result{}, BlockCounts: map[int64]int{}}
+	v := &writeSession{ID: "upsert", Project: "p", Schema: "default", Table: "t", Partition: "{}", Kind: "upsert", Status: "normal", Quota: "default", Meta: meta, Created: time.Now(), Sequence: 1024, Blocks: map[int64]engine.Result{}, BlockCounts: map[int64]int{}}
 	for n := int64(0); n < 1024; n++ {
 		v.Blocks[n] = engine.Result{}
 	}

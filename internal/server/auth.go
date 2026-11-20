@@ -116,12 +116,12 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) bool {
 	if len(parts) != 1 && (len(parts) != 5 || parts[3] != "odps" || parts[4] != "aliyun_v4_request" || parts[2] == "") {
 		return deny(401, "Unauthorized")
 	}
-	c, ok := s.cfg.Credentials[parts[0]]
+	c, ok := s.credential(parts[0])
 	if !ok || c.Secret == "" {
 		return deny(401, "Unauthorized")
 	}
 	date, err := http.ParseTime(r.Header.Get("Date"))
-	if err != nil || time.Since(date) > 15*time.Minute || time.Until(date) > 15*time.Minute || !c.ExpiresAt.IsZero() && time.Now().After(c.ExpiresAt) {
+	if err != nil || time.Since(date) > 15*time.Minute || time.Until(date) > 15*time.Minute || !c.ExpiresAt.IsZero() && !time.Now().Before(c.ExpiresAt) {
 		return deny(401, "Unauthorized")
 	}
 	if len(parts) == 5 && parts[1] != date.UTC().Format("20060102") {
@@ -172,6 +172,9 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) bool {
 		if !allowed {
 			return deny(403, "NoPermission")
 		}
+	}
+	if t != nil {
+		t.authenticatedKey = parts[0]
 	}
 	return true
 }

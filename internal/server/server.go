@@ -68,6 +68,7 @@ type Server struct {
 	inflight         chan struct{}
 	logKey           []byte
 	faults           map[string]*FaultRule
+	stsFixtures      map[string]stsFixture
 	activeWrites     atomic.Int64
 	peakWrites       atomic.Int64
 	activeDataWrites atomic.Int64
@@ -90,7 +91,7 @@ func New(e *engine.Engine, c Config) *Server {
 	if c.QueryTimeout == 0 {
 		c.QueryTimeout = 30 * time.Second
 	}
-	return &Server{logKey: []byte(id()), faults: map[string]*FaultRule{}, Engine: e, cfg: c, sessions: map[string]*session{}, instances: map[string]*instance{}, writes: map[string]*writeSession{}, storage: map[string]*storageSession{}, inflight: make(chan struct{}, c.MaxConcurrentRequests)}
+	return &Server{logKey: []byte(id()), faults: map[string]*FaultRule{}, stsFixtures: map[string]stsFixture{}, Engine: e, cfg: c, sessions: map[string]*session{}, instances: map[string]*instance{}, writes: map[string]*writeSession{}, storage: map[string]*storageSession{}, inflight: make(chan struct{}, c.MaxConcurrentRequests)}
 }
 func id() string {
 	var b [16]byte
@@ -128,6 +129,7 @@ func fail(w http.ResponseWriter, r *http.Request, status int, code string, e err
 	}
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r = splitQuotaRoute(r)
 	t := s.requestTrace(r)
 	r = withTrace(r, t)
 
@@ -203,6 +205,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			jsonResponse(w, 200, map[string]any{"active": s.activeWrites.Load(), "peak": s.peakWrites.Load(), "active_data": s.activeDataWrites.Load(), "peak_data": s.peakDataWrites.Load()})
 		} else if r.URL.Path == "/__test/faults" || strings.HasPrefix(r.URL.Path, "/__test/faults/") {
 			s.faultsAPI(w, r)
+		} else if r.URL.Path == stsFixturePath || strings.HasPrefix(r.URL.Path, stsFixturePath+"/") {
+			s.stsFixtureAPI(w, r)
 		} else {
 			http.NotFound(w, r)
 		}
@@ -306,7 +310,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			host = u.Host
 		}
 		w.Header().Set("Content-Type", "text/plain")
-		io.WriteString(w, host)
+		io.WriteString(w, quotaEndpoint(host, trace(r).Quota))
 		return
 	}
 	if len(rest) >= 1 && rest[0] == "resources" {
@@ -671,7 +675,7 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request, p, sc, t strin
 	partJSON, _ := json.Marshal(part)
 	s.mu.Lock()
 	v := s.sessions[q.Get("downloadid")]
-	if v == nil || time.Since(v.Created) > s.cfg.SessionTTL || v.Project != p || v.Schema != sc || v.Table != strings.ToLower(t) || v.Partition != string(partJSON) {
+	if v == nil || time.Since(v.Created) > s.cfg.SessionTTL || v.Project != p || v.Schema != sc || v.Table != strings.ToLower(t) || v.Partition != string(partJSON) || v.Quota != trace(r).Quota {
 		s.mu.Unlock()
 		fail(w, r, 404, "NoSuchDownload", fmt.Errorf("session missing, expired, closed, or bound to another table/partition"))
 		return
