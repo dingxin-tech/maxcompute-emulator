@@ -501,10 +501,9 @@ func (e *Engine) DeltaRead(ctx context.Context, p, s, name string, partitions []
 		return Result{}, 0, err
 	}
 	names := quoteNames(storedColumns(t))
-	// Two different questions, two different sources, both measured against the live
-	// service on 2026-10-14: cdc answers what happened from the append-only event
-	// history, while append answers what is new from live rows -- so a row that was
-	// inserted and later deleted inside the window appears in neither.
+	// CDC reads the append-only event history; APPEND reads the current live rows.
+	// A row inserted and deleted within the window is absent in APPEND but has
+	// both an insert event and a delete event in CDC.
 	src := Quote(t.Name)
 	cdcCodes := false
 	if events {
