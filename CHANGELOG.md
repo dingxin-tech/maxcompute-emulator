@@ -8,6 +8,62 @@
 - Translate nested query result types to ODPS ARRAY/MAP/STRUCT metadata before serving Tunnel results.
 - Add persistent managed Schema create/get/list/delete APIs with project isolation, prefix/paginated listing, idempotent deletion and cascade removal of managed objects.
 
+- Answer `SELECT get_latest_version('<project>[.<schema>].<table>')` in the SQL plane. It is
+  the poll a delta source makes before it plans a CDC window, so it now returns the same
+  number an incremental session reports as `LatestVersion` - including zero for an empty
+  ACID table, and the cutoff for a window that starts at the polled version and reads
+  nothing. A plain table and an unresolvable name are refused instead of answered with
+  zero, and `/capabilities` lists the function.
+
+- **Behavior change:** an incremental read window whose `EndVersion` is ahead of the version the table has
+  reached is refused with `400`/`InvalidParameter` instead of being served. `LatestVersion` is the cursor a
+  consumer stores, so handing back a number the table never reached puts every committed version up to the
+  bound behind it, permanently. A live measurement on 2026-11-12 (one project, one throwaway partitioned
+  ACID table) is what settled the form: at version 2 the service answers `(0,2]` with its two events and
+  refuses both `(0,3]` and `(0,1002]` with `The query version exceeded timetravel range`; the same request
+  first shipped in this branch capped the window to the bound, which protected the cursor but invented a
+  shape the service does not have. A `StartVersion` above the bound is refused the same way.
+- **Known divergence (measured 2026-11-12):** for an inverted window the service accepts `(2,1]` and answers
+  an empty window at version 1, while the emulator refuses it with `400`/`InvalidParameter`.
+- **Measured 2026-11-14, correcting what this branch said on 11-12:** the service's over-future refusal is
+  reachable after all - under the `IOException` the cause chain carries an `OdpsException` with HTTP status
+  `400` and error code `InvalidArgument`. The status this emulator returns is therefore confirmed to match. The
+  code string stays `InvalidParameter` deliberately: that is the invalid-value family across the storage face
+  (79 non-test uses; `InvalidArgument` appears nowhere here), and moving one cell onto the service's code would
+  split it. A consumer branching on the code string instead of the status will see this one difference.
+- `INSERT ... SELECT` whose source is a set operation over a delta table is projected before the relations meet. The staging
+  snapshot runs the whole source in one statement, so `UNION`/`INTERSECT`/`EXCEPT` would otherwise compare rows that still carry
+  the hidden version columns - the same user row committed at two versions answered two rows - or stop on the width difference
+  before any cleanup could run. Each `SELECT * FROM <table>` branch is rewritten onto that table's declared columns; a star that
+  cannot be attributed to a single relation (a join or a subquery inside the set operation) is refused with `UnsupportedFeature`
+  instead of answered, and a source with no delta table keeps the behaviour it always had.
+- `INSERT ... SELECT *` reading a delta table no longer fails with a column count mismatch: the staging
+  snapshot an INSERT takes keeps the hidden version columns out of the projection, so a copy into another
+  ACID table and an `INSERT OVERWRITE TABLE` onto itself both work, and every copied row takes its own
+  version in the target's event history.
+- The repair that brings a persisted ACID table written by an older release up to the current layout is
+  idempotent: reopening the same database file publishes the initial history exactly once, never moves the
+  version back, and leaves a write made after the restart readable from the cursor the previous start
+  reported. `TestOpenUpgradesPersistedDeltaTables` now restarts the file three times and pins all three.
+
+- **Behavior change (unified on the maintainer's 2026-11-04 decision):** every storage-face refusal of a capability the emulator does not provide now answers `405`/`MethodNotAllowed` - unknown `WriteMode`, filter-predicate pushdown, bucket / parallelism / bucket-sort split planning, an `Accept-Encoding` codec outside the advertised set, `data_format_type` / `data_format_version` outside Arrow V5, and a zero batch size. This matches the status the incremental-read refusals already used, so a consumer can tell "not provided here" (405) from "you sent something invalid" (400 `InvalidParameter`, unchanged: out-of-range row ranges and batch sizes, unknown split modes, unknown session types, unknown incremental mode, inverted version window, preview combined with an incremental read). `TestStorageRefusalContract` pins both directions. Refusals on other faces (Resources, functions, schemas, MCQA, table and instance routes) still answer `400`/`UnsupportedOperation`; extending the rule there is still an open question.
+- **Behavior change:** Storage v1 read sessions now accept `CrossPartition` instead of refusing it. The public table API (the surface the Flink/Spark connectors build on) defaults the flag to true, and every emulator read is answered with one logical split that already spans the selected partitions, so the refusal made the v1 batch and incremental paths unusable by a default-configured consumer without changing any observable result. Bucket splits, parallelism greater than one and bucket sort still fail explicitly.
+
+- Add Storage v1/v2 **incremental reads** over a version window for ACID tables: sessions created with `session_type=incremental_read` (v1) or `IncrementalRead=true` plus `IncrementalReadOptions` (v2) return the events published in `(StartVersion, EndVersion]`, echo `IncrementalReadOptions`, and publish `LatestVersion` so a consumer can store the version it reached and ask only for what follows. Every event carries the NOT NULL system columns `__meta_op_type` (`tinyint`) and `__meta_timestamp`; `cdc` includes update-before/delete images, `append` returns new content only.
+- Delta tables (primary key plus `transactional` or format-version 2) now keep row-level versions: each published row carries a sequence-stamped version, operation and commit time, and every write path - SQL `INSERT`, Tunnel upload, Storage batch/streaming/upsert commits, `INSERT OVERWRITE`, `TRUNCATE` and `ALTER TABLE DROP PARTITION` - appends its events to an append-only history, so a window still shows an insert that a later delete removed. The version columns are hidden from every projection and schema a user can see (`SELECT *` returns the declared columns).
+- Refuse the incremental forms that are not simulated, with the service's own status rather than an empty success: non-ACID tables, timestamp windows, `StartTxnId`, and filter predicates on an incremental window. `/capabilities` now declares `storage_incremental_read` and names each gap.
+- Aligned the incremental read shapes with a live project after measuring them:
+  append answers what is new from live rows, so a row inserted and then deleted
+  inside the same window appears in neither view, where before this it replayed the
+  insert; the CDC view publishes the after-image of a replacement as the services
+  update-after code while the live row keeps 8; LatestTxnId comes back as the empty
+  string the service returns. Per-row version advance, the data, system and
+  partition field order, and the ACID gate were confirmed rather than assumed.
+
+- Left open by that run and still documented as unverified rather than guessed: the
+  rule that separates the two update-after codes, event ordering across partitions or
+  under concurrent writers, and the timestamp-window form, which stays refused.
+
 - Document the two measured divergences from the live service in README - the status and error codes a refused chunked merge returns (`500`/`409` with `ODPS-0421213`/`ODPS-0421121` in the cloud, `400` here) and a `TABLE` resource that is created even when its table is missing (`404 NoSuchObject` in the cloud) - with what each measurement did and did not cover, and correct `docs/protocol.md`, which still said the service's HTTP status had not been read back and named `InvalidParameter` where the emulator answers `ResourceAlreadyExists`. No behavior changed.
 
 ## 1.2.0 — 2026-10-13

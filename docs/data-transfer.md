@@ -1,6 +1,6 @@
 # 数据传输与 SDK 验收
 
-1.0.0 的范围是表与 SQL 实例的数据传输。生产鉴权、云端存储调度、Volume、Blob 和 CDC 不在此版本中；不支持的 Action/增量或过滤读取返回错误。
+1.0.0 的范围是表与 SQL 实例的数据传输。生产鉴权、云端存储调度、Volume 与 Blob 不在此版本中；不支持的 Action 或过滤读取返回错误。ACID 表（主键 + `transactional`/format-version 2）支持按版本区间 `(StartVersion, EndVersion]` 的增量读取（`append`/`cdc`），事件列 `__meta_op_type`/`__meta_timestamp` 与 `LatestVersion` 一同返回；cdc 读只追加的事件历史，append 读当前活行（同一窗口内先插入后被删除的行两边都不出现）；更新后像在 cdc 视图里是 32、活行上是 8，这些形态 2026-10-14 已在真实项目实测对齐；时间窗与事务号续读、非 ACID 表返回明确错误（405）。2026-11-12 起，超过已提交边界的 `EndVersion` 与超过边界的 `StartVersion` 都返回 `400`/`InvalidParameter`（真机同实测拒绝，报 `The query version exceeded timetravel range`；11-14 从异常链读到真机是 `400`+`InvalidArgument`，模拟器状态码相同、错误码保持本仓 `InvalidParameter` 家族（`InvalidArgument` 全仓未用）。区间倒置真机回空窗口，模拟器仍拒绝）。`INSERT ... SELECT` 的源是集合运算时，每个 `SELECT * FROM <表>` 分支在 UNION/INTERSECT/EXCEPT 比较整行之前先投影成该表的声明列（暂存表一次性跑完整段源，否则同一用户行会按版本被重复去重）；归不到单一关系的星号（join 或子查询）明确拒绝 `UnsupportedFeature`，源里没有 delta 表则保持原行为。2026-11-04 起存储面的口径统一：模拟器不提供的能力一律 `405`/`MethodNotAllowed`（未知 WriteMode、过滤下推、物理分片计划、不支持的编码与 Arrow 格式/版本、零批量大小），值不合法仍 `400`/`InvalidParameter`。
 
 ## 支持矩阵
 
