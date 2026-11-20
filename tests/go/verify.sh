@@ -3,7 +3,7 @@ set -euo pipefail
 
 fixture="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 image="${1:?usage: bash tests/go/verify.sh IMAGE [LOCAL_GO_SDK_CHECKOUT]}"
-toolchain="${GO_CONSUMER_IMAGE:-golang:1.26.5-bookworm}"
+toolchain="${GO_CONSUMER_IMAGE:-golang:1.26.11-bookworm}"
 docker_args=(--mount "type=bind,source=$fixture,target=/fixture,readonly")
 if [[ $# -gt 1 ]]; then
   sdk="$(cd "$2" && pwd)"

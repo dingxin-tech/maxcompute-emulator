@@ -1,6 +1,6 @@
 module github.com/dingxin-tech/maxcompute-emulator
 
-go 1.27.1
+go 1.27.4
 
 require (
 	github.com/antlr4-go/antlr/v4 v4.13.1

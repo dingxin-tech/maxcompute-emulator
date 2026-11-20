@@ -190,7 +190,7 @@ endpoint 形态是 `http://`，运行环境 Linux/amd64。**第一轮**：2026-1
 ## 构建与验证
 
 ```bash
-# Go 1.27.1 + C/C++ 编译器，本机运行
+# Go 1.27.4 + C/C++ 编译器，本机运行
 go test ./...
 go run ./cmd/emulator --seed examples/seed.sql
 
