@@ -93,22 +93,6 @@ func (m *mcqaSession) expired(ttl time.Duration, now time.Time) bool {
 	return m != nil && now.Sub(m.lastActive) > ttl
 }
 
-// mcqaProperty is one Entry of the task's Config block; the SDK puts the JSON-encoded
-// session settings into the property named "settings".
-type mcqaProperty struct {
-	Name  string `xml:"Name"`
-	Value string `xml:"Value"`
-}
-
-func mcqaTaskSettings(props []mcqaProperty) string {
-	for _, p := range props {
-		if p.Name == "settings" {
-			return p.Value
-		}
-	}
-	return ""
-}
-
 // drop discards the oldest retained sub-query result to keep the session bounded.
 func (m *mcqaSession) drop() {
 	for len(m.order) >= mcqaRetainedQueries {

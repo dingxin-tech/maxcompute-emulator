@@ -395,20 +395,34 @@ func (s *Server) table(w http.ResponseWriter, r *http.Request, p, sc, t string) 
 	}
 	xmlResponse(w, tableXML(p, sc, table))
 }
+
+type instanceTaskProperties []struct {
+	Name  string `xml:"Name"`
+	Value string `xml:"Value"`
+}
+
+func (props instanceTaskProperties) settings() string {
+	for _, property := range props {
+		if property.Name == "settings" {
+			return property.Value
+		}
+	}
+	return ""
+}
+
 func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, rest []string) {
 	if len(rest) == 0 && r.Method == "POST" {
 		var req struct {
 			Job struct {
 				Tasks struct {
 					SQL []struct {
-						Name  string `xml:"Name"`
-						Query string `xml:"Query"`
+						Name       string                 `xml:"Name"`
+						Query      string                 `xml:"Query"`
+						Properties instanceTaskProperties `xml:"Config>Property"`
 					} `xml:"SQL"`
 					SQLRT []struct {
-						Name   string `xml:"Name"`
-						Config struct {
-							Properties []mcqaProperty `xml:"Property"`
-						} `xml:"Config"`
+						Name       string                 `xml:"Name"`
+						Properties instanceTaskProperties `xml:"Config>Property"`
 					} `xml:"SQLRT"`
 				} `xml:"Tasks"`
 			} `xml:"Job"`
@@ -423,7 +437,7 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 				return
 			}
 			rt := req.Job.Tasks.SQLRT[0]
-			s.mcqaCreate(w, r, p, sc, rt.Name, mcqaTaskSettings(rt.Config.Properties))
+			s.mcqaCreate(w, r, p, sc, rt.Name, rt.Properties.settings())
 			return
 		}
 		if len(req.Job.Tasks.SQL) != 1 {
@@ -433,6 +447,20 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 		task := req.Job.Tasks.SQL[0]
 		if task.Name == "" {
 			task.Name = "AnonymousSQLTask"
+		}
+		var settings struct {
+			DefaultSchema string `json:"odps.default.schema"`
+		}
+		if raw := task.Properties.settings(); raw != "" {
+			if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+				fail(w, r, 400, "InvalidParameter", fmt.Errorf("malformed SQL task settings"))
+				return
+			}
+		}
+		// The SQL lookup schema can differ from the schema used for the instance route.
+		querySchema := sc
+		if settings.DefaultSchema != "" {
+			querySchema = settings.DefaultSchema
 		}
 		i := &instance{Project: p, Schema: sc, ID: id(), Name: task.Name, Query: task.Query, Status: "Success", Created: time.Now()}
 		// Reserve capacity before executing SQL: a rejected INSERT must not commit.
@@ -449,7 +477,7 @@ func (s *Server) instance(w http.ResponseWriter, r *http.Request, p, sc string, 
 			}
 			s.mu.Unlock()
 		}()
-		res, e := s.Engine.Execute(r.Context(), p, sc, task.Query)
+		res, e := s.Engine.Execute(r.Context(), p, querySchema, task.Query)
 		i.Data = res
 		if e != nil {
 			i.Status = "Failed"

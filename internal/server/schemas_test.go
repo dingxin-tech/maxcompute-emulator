@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/xml"
 	"strings"
 	"testing"
 )
@@ -79,5 +80,45 @@ func TestSchemaREST(t *testing.T) {
 	code, body = sendBody(t, h, "POST", "/projects/p/schemas", []byte("<Schema><Name>bad"), nil)
 	if code != 400 || !strings.Contains(string(body), "SchemaParseError") {
 		t.Fatalf("invalid XML: %d %s", code, body)
+	}
+}
+
+func TestSQLTaskSettingsSelectDefaultSchema(t *testing.T) {
+	s, h := fixture(t, Config{})
+	ctx := t.Context()
+	if err := s.Engine.CreateSchema(ctx, "p", "analytics", "", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, setup := range []struct{ schema, value string }{{"default", "12"}, {"analytics", "34"}} {
+		_, err := s.Engine.Execute(ctx, "p", setup.schema, "create table sample(id bigint); insert into sample values("+setup.value+")")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct{ settings, status, result string }{
+		{`{}`, "Success", "id\n12\n"},
+		{`{"odps.default.schema":"analytics"}`, "Success", "id\n34\n"},
+		{`{"odps.default.schema":"missing"}`, "Failed", "schema does not exist"},
+	} {
+		path := "/projects/p/instances"
+		job := `<Instance><Job><Tasks><SQL><Config><Property><Name>settings</Name><Value>` + tc.settings +
+			`</Value></Property></Config><Query>select id from sample</Query></SQL></Tasks></Job></Instance>`
+		code, header, body := mcqaCall(t, h, "POST", path, []byte(job))
+		if code != 201 {
+			t.Fatalf("submit with %s: %d %s", tc.settings, code, body)
+		}
+		code, body = sendBody(t, h, "GET", header.Get("Location")+"?result", nil, nil)
+		var response struct {
+			Task struct{ Status, Result string } `xml:"Tasks>Task"`
+		}
+		err := xml.Unmarshal(body, &response)
+		if code != 200 || err != nil || response.Task.Status != tc.status || response.Task.Result != tc.result {
+			t.Fatalf("result with %s: %d %s", tc.settings, code, body)
+		}
+	}
+	code, body := sendBody(t, h, "POST", "/projects/p/instances", []byte(
+		`<Instance><Job><Tasks><SQL><Config><Property><Name>settings</Name><Value>{</Value></Property></Config></SQL></Tasks></Job></Instance>`), nil)
+	if code != 400 || !strings.Contains(string(body), "malformed SQL task settings") {
+		t.Fatalf("bad job settings: %d %s", code, body)
 	}
 }
