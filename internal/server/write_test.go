@@ -92,6 +92,16 @@ func TestStorageExactlyOnceReplayAndAtomicCommit(t *testing.T) {
 	var m map[string]any
 	json.Unmarshal(b, &m)
 	sid := m["SessionId"].(string)
+	for _, streamID := range []string{"worker_1", "worker.1", "worker/1", "worker 1"} {
+		body, err := json.Marshal(map[string]any{"StreamId": streamID, "StreamVersion": 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		code, b := call("TableCreateWriteStream&SessionId="+sid, string(body))
+		if code != 400 || !strings.Contains(string(b), "stream id invalid") {
+			t.Fatalf("invalid stream ID %q: %d %s", streamID, code, b)
+		}
+	}
 	code, b = call("TableCreateWriteStream&SessionId="+sid, `{"StreamId":"s","StreamVersion":1,"ExactlyOnceMode":true}`)
 	if code != 200 {
 		t.Fatal(code, string(b))

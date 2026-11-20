@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +17,8 @@ import (
 	"github.com/dingxin-tech/maxcompute-emulator/internal/engine"
 	"github.com/dingxin-tech/maxcompute-emulator/internal/wire"
 )
+
+var storageStreamIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 
 type storageStream struct {
 	Token           string
@@ -451,8 +454,12 @@ func (s *Server) storageAPI(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if streamID == "" || version < 0 {
-			bad(400, "InvalidParameter", fmt.Errorf("invalid stream id/version"))
+		if !storageStreamIDPattern.MatchString(streamID) {
+			bad(400, "InvalidParameter", fmt.Errorf("stream id invalid, only allowed [A-Za-z0-9-]+"))
+			return
+		}
+		if version < 0 {
+			bad(400, "InvalidParameter", fmt.Errorf("invalid stream version"))
 			return
 		}
 		st := v.Streams[streamID]
