@@ -25,7 +25,7 @@ within one process; logs omit raw session IDs, query strings and credentials.
 For Docker, explicitly opt into a test network and bind the host port locally:
 
 ```sh
-docker run --rm -p 127.0.0.1:8080:8080 maxcompute/maxcompute-emulator:1.2.0 \
+docker run --rm -p 127.0.0.1:8080:8080 maxcompute/maxcompute-emulator:1.2.1 \
   --listen 0.0.0.0:8080 --test-mode --test-network --quotas named
 ```
 
@@ -122,7 +122,7 @@ Mount a JSON file of **invented test credentials** and select strict mode:
 
 ```sh
 docker run --rm -p 127.0.0.1:8080:8080 \
-  -v "$PWD/auth.json:/tmp/auth.json:ro" maxcompute/maxcompute-emulator:1.2.0 \
+  -v "$PWD/auth.json:/tmp/auth.json:ro" maxcompute/maxcompute-emulator:1.2.1 \
   --listen 0.0.0.0:8080 --auth-mode strict --auth-config /tmp/auth.json
 ```
 
@@ -181,7 +181,7 @@ client or ClickHouse E2E runner.
 
 ## Write-stage faults (1.2.0)
 
-Use version 1.2.0 or a reviewed source build for these controls. Enable `--test-mode --test-network` with a loopback host port as
+Use version 1.2.1 or a reviewed source build for these controls. Enable `--test-mode --test-network` with a loopback host port as
 above. Select an explicit plane, object, action and UUID table so unrelated reads
 and metadata requests cannot consume the fault.
 

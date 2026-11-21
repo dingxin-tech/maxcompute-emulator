@@ -2,6 +2,62 @@
 
 ## Unreleased
 
+## 1.2.1 — 2026-11-21
+
+- **Behavior change:** concurrent HTTP admission is configurable, and an over-budget request is
+  now refused the way the service refuses it. The default in-flight budget goes from 16 to 256;
+  `--max-concurrent-requests` accepts 1-16384 and an out-of-range value fails startup instead of
+  admitting anyway. Above the budget the request gets `429`/`FlowExceeded` with `Retry-After: 1`
+  before SQL parsing, session creation or any mutation - in 1.2.0 the same overload answered
+  `503`/`ServiceUnavailable`, so a consumer that retries only on 5xx, or that branches on the error
+  code string, has to be re-checked against this. The test-mode write counters now run after the
+  admission slot is taken, so a refused request cannot inflate the active/peak numbers that
+  pressure journeys assert on. This is a concurrent-request budget, not QPS or bandwidth; the
+  contract and the sizing advice are in [reliability](docs/reliability.md).
+  `TestRequestCapacityDefaultsAndOverrides` and
+  `TestRequestAdmission429DoesNotMutateOrInflateWriteMetrics` pin both directions.
+- **Behavior change:** a submitted SQL task honours the `odps.default.schema` setting carried in its
+  `Config`/`Property` block, so an unqualified table name resolves in the schema the client declared
+  rather than the schema on the instance route. Settings JSON that does not parse is refused
+  `400`/`InvalidParameter` before the task runs. `TestSQLTaskSettingsSelectDefaultSchema`.
+- **Behavior change:** Storage write-stream IDs must match the production format `[A-Za-z0-9-]+`.
+  1.2.0 accepted any non-empty string and refused only the empty one, so a client that names its
+  streams `worker_1`, `worker.1`, `worker/1` or `worker 1` now gets `400`/`InvalidParameter`
+  (`stream id invalid, only allowed [A-Za-z0-9-]+`) where it used to get a usable stream. The check
+  runs per `TableCreateWriteStream` request, alongside the existing negative-version refusal.
+  Asserted inside `TestStorageExactlyOnceReplayAndAtomicCommit`.
+- Named-quota routing is discoverable: a named quota's discovery reply carries an endpoint under
+  `/__quota/<name>`, which supplies the quota for subsequent requests without changing the signed
+  resource path. Use `quota` for Storage discovery and `quotaName` for legacy Tunnel discovery; two
+  conflicting explicit names are refused `400`/`InvalidParameter`; a Storage V2 session and a legacy
+  download or upload session keep the quota they were created with.
+  `TestNamedQuotaRoutesStorageAndTunnelSessions`.
+- Temporary test credentials can now rotate. With `--test-mode` **and** strict authentication, a
+  configured test principal signs `POST /__test/sts?ttl_seconds=N` (1-300, default 60) and receives
+  an opaque path to use as a `credentials_uri`: an unsigned `GET` there returns a synthetic
+  AccessKeyId/AccessKeySecret/SecurityToken/Expiration that inherits that principal's grants, a
+  signed `POST` to the same path issues a new generation and revokes the previous one, and a signed
+  `DELETE` removes the fixture. Treat the URL as a test secret and run it on an isolated listener;
+  this is a deterministic ACL fixture, not RAM policy evaluation or real STS validation.
+  `TestSTSFixtureRotatesAndInheritsACLs`, `TestSTSFixtureRequiresStrictTestMode`.
+- `emulator proxy --upstream <fixed endpoint> [--capture-headers a,b]` forwards a signed SDK request
+  to that upstream unchanged (method, query, body, end-to-end headers) and writes one JSON line per
+  completed request to stdout - time, method, path without query, the selected request headers in
+  canonical casing, upstream status and Request ID. Credential-bearing headers are rejected as
+  capture choices, forward-proxy requests are refused, bodies and query values never enter the
+  capture, and an upstream transport failure is recorded as `502` with
+  `"error":"upstream_transport"`. See [capture proxy](docs/capture-proxy.md).
+- The published Go SDK is a regression surface now, not an assumption:
+  `bash tests/go/verify.sh IMAGE [LOCAL_GO_SDK_CHECKOUT]` runs the same `database/sql` and resumable
+  Protobuf Tunnel consumers against `aliyun-odps-go-sdk` v0.4.26, with an optional 1.0 checkout, and
+  CI runs that step. `TestGoConsumerUpgrade`.
+- Build and acceptance moved onto the patched Go toolchains: `golang:1.27.4-bookworm`, `go 1.27.4`
+  in `go.mod`, and `golang:1.26.11-bookworm` for the Go consumer image. The Docker build stage now
+  resolves dependencies for its own platform instead of eagerly downloading every DuckDB archive,
+  and `.github/workflows/package.yml` produces the verified offline image archive for a published
+  release from its digest.
+
+
 - Accept ordinary block comments in SQL, including long comments within the SQL byte limit, while preserving string literal contents and optimizer-hint tokens.
 - Validate SQL without retaining an unused parse tree, share one validation budget across execution and SQLRT admission, and reuse executed result formatting instead of reparsing every result. Include concurrent token-heavy regressions and a long-IN-list allocation benchmark.
 - Execute JDBC typed numeric literals (`L`, `Y`, `S`, `BD`, `F`) with their declared types, decimal precision and range checks, including signed minimum integers. Add engine and published-driver regressions; strings and quoted identifiers remain unchanged.
