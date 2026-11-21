@@ -1,6 +1,6 @@
 # Connector-facing protocol contracts
 
-These contracts are included in version 1.2.0. Build from the repository
+These contracts are included in version 1.2.1. Build from the repository
 [Dockerfile](../Dockerfile), or use the published version pinned by image digest.
 Record its source commit and image identity. They support local SDK/Connector correctness
 tests; they do not reproduce the distributed MaxCompute service.
