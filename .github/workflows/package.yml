@@ -36,6 +36,7 @@ jobs:
           docker image inspect "$IMAGE" > image-inspect.json
           docker tag "$IMAGE" "$IMAGE_REPO:$VERSION"
       - name: Package and publish offline archive
+        shell: bash
         run: |
           archive="maxcompute-emulator-$VERSION-linux-amd64.tar.gz"
           docker save "$IMAGE_REPO:$VERSION" | gzip -1 > "$archive"
