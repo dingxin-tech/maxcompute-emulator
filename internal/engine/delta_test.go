@@ -345,3 +345,39 @@ func TestDeltaDropPartitionPublishesDeleteEvents(t *testing.T) {
 		t.Fatalf("read the surviving partition: %v", err)
 	}
 }
+
+// TestDeltaSameWindowInsertThenDeleteKeepsBothEventsInCdc pins the split the maintainer
+// clarified on 2026-11-20, which README and the changelog had flattened into "in neither
+// view": a row inserted and deleted inside one window disappears from append - which reads
+// live rows - while the CDC history keeps both its insert and its delete event. That is also
+// what the live project answered on 2026-10-14 for the same window: cdc [2:2, 2:4, 1:2, 1:16,
+// 1:32] against append [1:8]. Without this cell the docs can drift back, because both views
+// agree for every row that is still live.
+func TestDeltaSameWindowInsertThenDeleteKeepsBothEventsInCdc(t *testing.T) {
+	ctx := context.Background()
+	e := openTestEngine(t)
+	if _, err := e.Execute(ctx, "p", "default",
+		"create table sw(id bigint, s string, primary key(id)) tblproperties('transactional'='true')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Write(ctx, "p", "default", "sw", map[string]string{}, [][]any{{int64(9), "x"}}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Write(ctx, "p", "default", "sw", map[string]string{}, [][]any{{int64(9), nil}}, false, []byte{'D'}); err != nil {
+		t.Fatal(err)
+	}
+	cdc, bound, err := e.DeltaRead(ctx, "p", "default", "sw", nil, 0, -1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(opCodes(cdc)); got != "[2 4]" {
+		t.Fatalf("cdc events=%s want the insert followed by the delete of the same row (bound=%d)", got, bound)
+	}
+	appended, _, err := e.DeltaRead(ctx, "p", "default", "sw", nil, 0, -1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(appended.Rows) != 0 {
+		t.Fatalf("append rows=%v want none: the row was removed before anyone read it", appended.Rows)
+	}
+}
