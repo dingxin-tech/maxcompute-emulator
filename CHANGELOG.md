@@ -4,6 +4,12 @@
 
 ## 1.2.1 — 2026-11-21
 
+- **Documentation correction, follow-up to `e093b68`:** README (both languages) and the changelog entry above still said a row
+  inserted and deleted inside one window "appears in neither view". It does not: `append` reads live rows so the row is gone,
+  while `cdc` reads the append-only history and keeps both its insert (2) and delete (4) events - which is also what the
+  2026-10-14 live readings show (`cdc [2:2, 2:4, 1:2, 1:16, 1:32]` against `append [1:8]` for the same window). The split is now
+  pinned by `TestDeltaSameWindowInsertThenDeleteKeepsBothEventsInCdc` so the wording cannot drift back.
+
 - **Behavior change:** concurrent HTTP admission is configurable, and an over-budget request is
   now refused the way the service refuses it. The default in-flight budget goes from 16 to 256;
   `--max-concurrent-requests` accepts 1-16384 and an out-of-range value fails startup instead of
@@ -110,8 +116,9 @@
 - Refuse the incremental forms that are not simulated, with the service's own status rather than an empty success: non-ACID tables, timestamp windows, `StartTxnId`, and filter predicates on an incremental window. `/capabilities` now declares `storage_incremental_read` and names each gap.
 - Aligned the incremental read shapes with a live project after measuring them:
   append answers what is new from live rows, so a row inserted and then deleted
-  inside the same window appears in neither view, where before this it replayed the
-  insert; the CDC view publishes the after-image of a replacement as the services
+  inside the same window is absent from append while the CDC view keeps both its
+  insert and delete events (live readings: CDC `[2:2, 2:4, 1:2, 1:16, 1:32]`,
+  append `[1:8]`), where before this the emulator replayed the insert in append; the CDC view publishes the after-image of a replacement as the services
   update-after code while the live row keeps 8; LatestTxnId comes back as the empty
   string the service returns. Per-row version advance, the data, system and
   partition field order, and the ACID gate were confirmed rather than assumed.
