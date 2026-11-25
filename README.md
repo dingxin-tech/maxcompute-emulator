@@ -2,7 +2,7 @@
 
 [简体中文](README.zh-CN.md) · [Docker Hub](https://hub.docker.com/r/maxcompute/maxcompute-emulator) · [Compatibility](docs/release-readiness.md) · [Changelog](CHANGELOG.md)
 
-Run a local MaxCompute-compatible service for SDK development and integration tests. Version **1.2.0** is a Go + DuckDB rewrite with SQL fixtures, table and partition metadata, Tunnel Protobuf/Arrow transfers, and Storage API v2. Version 1.2.0 also supports Storage v1 batch reads; see [Connector contracts](docs/connector-conformance.md).
+Run a local MaxCompute-compatible service for SDK development and integration tests. Version **1.2.1** is a Go + DuckDB rewrite with SQL fixtures, table and partition metadata, Tunnel Protobuf/Arrow transfers, and Storage API v2. Version 1.2.1 adds Storage v1/v2 incremental reads over a version window for ACID tables, managed Schema APIs, JDBC typed literals, bounded SQL validation and configurable concurrent HTTP admission; the 1.2.0 Storage v1 batch reads remain; see [Connector contracts](docs/connector-conformance.md).
 
 `main` contains the Go implementation. The previous Spring Boot + SQLite implementation is preserved on [`legacy`](https://github.com/dingxin-tech/maxcompute-emulator/tree/legacy); its existing image tags remain available.
 
@@ -11,16 +11,16 @@ Run a local MaxCompute-compatible service for SDK development and integration te
 Docker images target **Linux amd64**. On Apple Silicon, use Docker's amd64 emulation.
 
 ```bash
-docker pull maxcompute/maxcompute-emulator:1.2.0
+docker pull maxcompute/maxcompute-emulator:1.2.1
 docker run --rm --name mc-emulator --platform linux/amd64 \
-  -p 127.0.0.1:8080:8080 maxcompute/maxcompute-emulator:1.2.0 \
+  -p 127.0.0.1:8080:8080 maxcompute/maxcompute-emulator:1.2.1 \
   --listen 0.0.0.0:8080 --seed /opt/emulator/seed.sql
 curl -fsS http://127.0.0.1:8080/readyz
 ```
 
 Use `http://127.0.0.1:8080` for both the ODPS endpoint and Tunnel endpoint, project `test_project`, schema `default`, and dummy credentials such as `test-ak` / `test-sk`. The seed creates `demo` and partitioned `events` tables. Omit `--seed` to start empty.
 
-Pin `1.2.0` for reproducible tests. `latest` follows stable releases and may change.
+Pin `1.2.1` for reproducible tests. `latest` follows stable releases and may change.
 
 ## Inspect SDK requests to a live endpoint
 
@@ -34,7 +34,7 @@ Use `com.aliyun.odps:odps-sdk-core:0.61.2-public` and Testcontainers. A complete
 
 ```java
 try (GenericContainer<?> mc = new GenericContainer<>(
-        DockerImageName.parse("maxcompute/maxcompute-emulator:1.2.0"))
+        DockerImageName.parse("maxcompute/maxcompute-emulator:1.2.1"))
         .withExposedPorts(8080)
         .waitingFor(Wait.forHttp("/readyz"))) {
     mc.start();
@@ -60,7 +60,7 @@ With JDK 17, Maven and Docker installed:
 
 ```bash
 mvn -B -f tests/java/pom.xml \
-  -Demulator.image=maxcompute/maxcompute-emulator:1.2.0 test
+  -Demulator.image=maxcompute/maxcompute-emulator:1.2.1 test
 ```
 
 Arrow on JDK 17 requires `--add-opens=java.base/java.nio=ALL-UNNAMED`; the test POM sets it. Both endpoints must use the mapped port. Between containers on one Docker network, use the emulator's container DNS name instead of `localhost`.
@@ -79,7 +79,7 @@ jdbc:odps:http://127.0.0.1:8080?project=test_project&accessId=test-ak&accessKey=
 
 ```bash
 mvn -B -f tests/jdbc/pom.xml \
-  -Demulator.image=maxcompute/maxcompute-emulator:1.2.0 test
+  -Demulator.image=maxcompute/maxcompute-emulator:1.2.1 test
 ```
 
 The driver signs a logview token and opens a Tunnel download session for **every**
@@ -114,7 +114,7 @@ Offline SQL instance results (`?result`) also include the CSV column-name header
 MCQA sessions cover both of the Java SDK's read paths: the information channel (`SQLExecutor` with `useInstanceTunnel(false)`) answers with CSV whose first line is the column-name header, and the instance tunnel (`?data&cached&taskname=..&queryid=..`, the default fetch and the one JDBC MaxQA uses) answers with a record stream that carries its own schema, so a sub-query result arrives with the same rows and the same types either way. `instance_tunnel_limit_enabled` applies the service's `READ_TABLE_MAX_ROW` (10,000 rows) to that read, `rowrange` pages through it, and `sizelimit` shortens a response instead of failing it. Statements that produce no result set are refused on the tunnel with `InstanceTypeNotSupported`, like the service, so a client confirms them through the session API rather than reading an empty stream. A session is **select-only by default**: a `CREATE`/`INSERT`/`DROP` submitted as a sub query is declined before anything runs (`queryId: -1` plus `ODPS-1850001 Non select query not supported.`), because the Java client reacts to a non-select it learns about at fetch time by running the same statement offline again — and an INSERT that already ran in the session would land twice. Send `odps.sql.session.select.only=false`, in the session settings or per statement, to run them in the session anyway. Session-scoped state (variables, temp objects) is not isolated — statements run against the shared engine. Not simulated: named-session attach (a session name is metadata; equal names create separate sessions), MaxQA v2 (`/mcqa` request prefix), compressed or Arrow-encoded sub-query downloads (Protobuf records only), and per-statement statistics.
 Unsupported: Storage v1 write sessions, Volume/Blob, incremental reads over a timestamp window or resumed by transaction id, filter predicate pushdown, column schema evolution, UDF **execution** (functions are registered metadata; SQL `CREATE FUNCTION`/`DROP FUNCTION` and calling a UDF return `UnsupportedFeature`), volume-backed resources, distributed scheduling, and full ODPS SQL semantics.
 
-Incremental reads answer only for ACID tables (a primary key plus `transactional` or format-version 2 properties), refused the same way the service refuses them: `405`/`MethodNotAllowed` with `Only ACID table support incremental read`. A session pins the version the table had reached when it was created, returns what falls inside `(StartVersion, EndVersion]` (an unset `EndVersion` means that pinned version) and reports it back as `LatestVersion`, so a reader that stores the version it reached can ask for what came next. An `EndVersion` ahead of that pinned version is **refused**, `400`/`InvalidParameter`: measured on 2026-11-12 against a live ACID table at version 2, `(0,2]` answers its events while `(0,3]` and `(0,1002]` both fail with `The query version exceeded timetravel range`. The emulator will not hand back a number the table never reached, because the reader stores it as its cursor and every version up to the bound would then fall behind it. A `StartVersion` ahead of the bound is refused the same way, as is an inverted window - and there the service differs: measured the same day, `(2,1]` is accepted and answers an empty window at version 1. The emulator fails it instead of returning a cursor below the reader's own start; the service's own refusal was then read on 2026-11-14 by walking the client-side cause chain below the `IOException`: an `OdpsException` with HTTP status `400` and error code `InvalidArgument`. The status matches this emulator; the code string is left as `InvalidParameter` on purpose - it is the invalid-value family across the storage face (79 non-test uses) and `InvalidArgument` appears nowhere in this repository, so mirroring it for one cell would split the family. `cdc` answers what happened and reads the event history; `append` answers what is new and reads live rows: a row inserted and then deleted inside one window is **absent from `append`, while `cdc` keeps both its insert (2) and delete (4) events**. Every event carries the NOT NULL `tinyint` `__meta_op_type` and `__meta_timestamp`; the codes are 2 insert, 4 delete, 16 update-before and the after-image of a replacement, which the service publishes as 32 in the CDC view while the live row keeps 8 - consumers fold both into UPDATE_AFTER. Both shapes, the `data -> system -> partition` Arrow field order and the empty-string `LatestTxnId` were read off a live MaxCompute project on 2026-10-14; what was not compared is the rule that separates 8 from 32, event ordering across partitions or concurrent writers, and the timestamp-window form, which the emulator refuses instead of guessing. A version column, an operation column and a commit timestamp are stored beside each row and stay out of every user-visible projection and schema - including the staging snapshot an `INSERT ... SELECT *` takes from a delta table, so copying into another ACID table or overwriting the same one works and each copied row takes its own version in the target's history. The same applies when the source is a set operation: the stage runs the whole source in one statement, so every `SELECT * FROM <table>` branch is projected onto that table's declared columns **before** `UNION`/`INTERSECT`/`EXCEPT` compare rows - deduplicating over the physical row would count the same user row once per version. A star that cannot be attributed to a single relation (a join or a subquery inside the set operation) is refused with `UnsupportedFeature` rather than answered, and a source with no delta table in it keeps the behaviour it always had; `LatestVersion` comes from the highest version in the event history, so it never moves backwards when the newest rows are removed. Timestamp windows (`StartTimeStamp`/`EndTimeStamp`), `StartTxnId`, filter predicates over an incremental window and physical bucket/parallelism split planning are refused explicitly and listed in `/capabilities`.
+Incremental reads answer only for ACID tables (a primary key plus `transactional` or format-version 2 properties), refused the same way the service refuses them: `405`/`MethodNotAllowed` with `Only ACID table support incremental read`. A session pins the version the table had reached when it was created, returns what falls inside `(StartVersion, EndVersion]` (an unset `EndVersion` means that pinned version) and reports it back as `LatestVersion`, so a reader that stores the version it reached can ask for what came next. An `EndVersion` ahead of that pinned version is **refused**, `400`/`InvalidParameter`: measured on 2026-11-12 against a live ACID table at version 2, `(0,2]` answers its events while `(0,3]` and `(0,1002]` both fail with `The query version exceeded timetravel range`. The emulator will not hand back a number the table never reached, because the reader stores it as its cursor and every version up to the bound would then fall behind it. That over-future refusal is the cell the 2026-11-14 reading walked: below the client-side `IOException` the cause chain carries an `OdpsException` with HTTP status `400` and error code `InvalidArgument`. The status matches this emulator; the code string is left as `InvalidParameter` on purpose - it is the invalid-value family across the storage face (79 non-test uses) and `InvalidArgument` appears nowhere in this repository, so mirroring it for that cell would split the family. A `StartVersion` ahead of the bound is refused the same way. An inverted window is a different divergence, and there the service does not refuse at all: measured on 2026-11-12 as well, `(2,1]` is accepted and answers an empty window at version 1, while the emulator fails it instead of returning a cursor below the reader's own start. `cdc` answers what happened and reads the event history; `append` answers what is new and reads live rows: a row inserted and then deleted inside one window is **absent from `append`, while `cdc` keeps both its insert (2) and delete (4) events**. Every event carries the NOT NULL `tinyint` `__meta_op_type` and `__meta_timestamp`; the codes are 2 insert, 4 delete, 16 update-before and the after-image of a replacement, which the service publishes as 32 in the CDC view while the live row keeps 8 - consumers fold both into UPDATE_AFTER. Both shapes, the `data -> system -> partition` Arrow field order and the empty-string `LatestTxnId` were read off a live MaxCompute project on 2026-10-14; what was not compared is the rule that separates 8 from 32, event ordering across partitions or concurrent writers, and the timestamp-window form, which the emulator refuses instead of guessing. A version column, an operation column and a commit timestamp are stored beside each row and stay out of every user-visible projection and schema - including the staging snapshot an `INSERT ... SELECT *` takes from a delta table, so copying into another ACID table or overwriting the same one works and each copied row takes its own version in the target's history. The same applies when the source is a set operation: the stage runs the whole source in one statement, so every `SELECT * FROM <table>` branch is projected onto that table's declared columns **before** `UNION`/`INTERSECT`/`EXCEPT` compare rows - deduplicating over the physical row would count the same user row once per version. A star that cannot be attributed to a single relation (a join or a subquery inside the set operation) is refused with `UnsupportedFeature` rather than answered, and a source with no delta table in it keeps the behaviour it always had; `LatestVersion` comes from the highest version in the event history, so it never moves backwards when the newest rows are removed. Timestamp windows (`StartTimeStamp`/`EndTimeStamp`), `StartTxnId`, filter predicates over an incremental window and physical bucket/parallelism split planning are refused explicitly and listed in `/capabilities`.
 
 A delta source loop closes on one more piece: `SELECT get_latest_version(project[.schema].table)` answers from the same version bound an incremental session reports as `LatestVersion`, so a cursor stored from one can be polled with the other.
 
@@ -133,7 +133,7 @@ stay as they are on purpose: the codes in those rows are what this repository's 
 one is a contract decision, not a documentation fix. Until that decision is taken, this section is the
 tracking list — if your measurement contradicts a row, open an issue with both readings and a request id.
 
-Both rows describe the post-1.1.0 implementation retained in version 1.2.0; the older
+Both rows describe the post-1.1.0 implementation retained in version 1.2.1; the older
 1.1.0 image is outside both of them. Checked directly against
 `maxcompute/maxcompute-emulator:1.1.0` (digest `sha256:57d1d25757255a1f16d0a3c34ef8b99c24bf8615e1c14c13dfd5a41026dee2d3`,
 2026-10-08): `GET /projects/<project>/resources` answers `404` with `UnsupportedOperation: unsupported

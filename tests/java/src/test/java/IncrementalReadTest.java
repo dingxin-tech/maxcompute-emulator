@@ -41,7 +41,7 @@ public class IncrementalReadTest {
           new GenericContainer<>(
                   DockerImageName.parse(
                       System.getProperty(
-                          "emulator.image", "maxcompute/maxcompute-emulator:1.2.0")))
+                          "emulator.image", "maxcompute/maxcompute-emulator:1.2.1")))
               .withExposedPorts(8080)
               .waitingFor(Wait.forHttp("/readyz"));
       container.start();

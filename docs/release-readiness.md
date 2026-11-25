@@ -1,8 +1,10 @@
-# 1.2.0 兼容范围
+# 1.2.1 兼容范围
 
 1.1.0 增加P0协议修复、JSON日志、12类测试故障、命名quota、可选strict鉴权和SQL类型fixture，配置见 [reliability.md](reliability.md)。Go race/vet、Java SDK 33项与C++ Arrow wire正反例已验证；完整CK runner及真实MaxCompute鉴权/配额仍需独立验收。
 
 1.2.0 增加 Storage v1 批量读取、字符类型、原子 rename/分区操作和写阶段故障控制；验收范围见 [Connector 协议](connector-conformance.md)。
+
+1.2.1 增加 ACID 表的版本窗口增量读取（Storage v1/v2）、managed Schema API、JDBC 类型化字面量与嵌套结果类型、SQL 校验内存上限与块注释、固定上游代理捕获、命名 quota 发现与测试 STS 轮换夹具。行为变更四处：并发准入默认 16→256 且超额回 `429`/`FlowExceeded`（1.2.0 是 `503`/`ServiceUnavailable`）；存储面对未提供能力的拒绝统一到 `405`/`MethodNotAllowed`；Storage 写流 ID 必须匹配生产格式 `[A-Za-z0-9-]+`；提交的 SQL task 按 `odps.default.schema` 解析非限定表名。逐条影响与验收见 [发行说明](release-notes.md) 与 [Connector 协议](connector-conformance.md)。
 
 以下保留1.0.0数据面与Flink范围；1.1.0未扩大Volume/Blob/CDC或checkpoint恢复承诺。
 
@@ -46,7 +48,7 @@
 
 ## 发布验证
 
-版本 tag 工作流执行 Go race/vet、Linux 源码镜像构建与 Java SDK Testcontainers；推送 Docker Hub 的版本标签后显式拉取并再次执行 SDK 测试，通过后更新 latest 和 GitHub Release。执行状态以对应 Actions run 为准。
+版本 tag 工作流执行 Go race/vet、Linux 源码镜像构建与 Java SDK Testcontainers；推送 Docker Hub 的版本标签后显式拉取并再次执行 SDK 测试，通过后更新 latest 和 GitHub Release。执行状态以对应 Actions run 为准。Go SDK 消费者、JDBC 驱动与 PyODPS 探针只在 CI（push/PR）跑：打 tag 出车前对同一 commit 手工补跑这三步，或把它们的 job 补进 tag 工作流。
 
 ### 旧版本持久化文件的升级复验
 

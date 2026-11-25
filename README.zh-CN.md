@@ -1,17 +1,17 @@
 # MaxCompute Emulator
 
-Go + DuckDB 实现的本地 MaxCompute 测试服务。**1.2.0** 支持 ClickHouse 当前 ODPS-CPP Tunnel 读表，以及 Java SDK 的 Tunnel 批量/流式上传、Upsert、实例结果下载、Storage API 批量/流式 Arrow 读写。[English](README.md) · [发布评审与元数据/Flink 支持范围](docs/release-readiness.md)。支持矩阵和回归用例见 [docs/data-transfer.md](docs/data-transfer.md)。
+Go + DuckDB 实现的本地 MaxCompute 测试服务。**1.2.1** 支持 ClickHouse 当前 ODPS-CPP Tunnel 读表，以及 Java SDK 的 Tunnel 批量/流式上传、Upsert、实例结果下载、Storage API 批量/流式 Arrow 读写。[English](README.md) · [发布评审与元数据/Flink 支持范围](docs/release-readiness.md)。支持矩阵和回归用例见 [docs/data-transfer.md](docs/data-transfer.md)。
 
-`main` 为 Go 实现，原 Spring Boot/SQLite 版本保留在 [`legacy`](https://github.com/dingxin-tech/maxcompute-emulator/tree/legacy)。1.2.0 支持 Storage v1 批量读取；物理分片与分布式服务恢复未实现。见[Connector 协议与验收范围](docs/connector-conformance.md)。默认接受测试 AK/SK；可选 strict 模式检查本地测试凭据的签名、STS、日期和读写权限，适用于本地与 CI 测试环境。
+`main` 为 Go 实现，原 Spring Boot/SQLite 版本保留在 [`legacy`](https://github.com/dingxin-tech/maxcompute-emulator/tree/legacy)。1.2.1 支持 Storage v1 批量读取与 ACID 表的版本窗口增量读取（v1/v2）；物理分片与分布式服务恢复未实现。见[Connector 协议与验收范围](docs/connector-conformance.md)。默认接受测试 AK/SK；可选 strict 模式检查本地测试凭据的签名、STS、日期和读写权限，适用于本地与 CI 测试环境。
 
 ## 启动镜像
 
 交付包中的镜像为 Linux amd64；Apple Silicon 通过 Docker 的 amd64 模拟运行。
 
 ```bash
-docker pull maxcompute/maxcompute-emulator:1.2.0
+docker pull maxcompute/maxcompute-emulator:1.2.1
 docker run --rm --name mc-emulator --platform linux/amd64 \
-  -p 127.0.0.1:8080:8080 maxcompute/maxcompute-emulator:1.2.0 \
+  -p 127.0.0.1:8080:8080 maxcompute/maxcompute-emulator:1.2.1 \
   --listen 0.0.0.0:8080 --seed /opt/emulator/seed.sql
 curl -fsS http://127.0.0.1:8080/readyz
 ```
@@ -29,7 +29,7 @@ curl -fsS http://127.0.0.1:8080/readyz
 ```bash
 docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 \
   -v "$PWD/fixtures.sql:/fixtures.sql:ro" \
-  maxcompute/maxcompute-emulator:1.2.0 \
+  maxcompute/maxcompute-emulator:1.2.1 \
   --listen 0.0.0.0:8080 --seed /fixtures.sql --project test_project
 ```
 
@@ -48,11 +48,11 @@ docker run --rm --platform linux/amd64 -p 127.0.0.1:8080:8080 \
 mvn -B -f tests/java/pom.xml test
 ```
 
-默认通过 Testcontainers 启动本地 `maxcompute/maxcompute-emulator:1.2.0`，动态分配端口，等待 `/readyz`，运行后销毁容器。可指定 `-Demulator.image=自定义镜像名:版本`；验证已启动服务用 `-Demulator.endpoint=http://127.0.0.1:8080`。
+默认通过 Testcontainers 启动本地 `maxcompute/maxcompute-emulator:1.2.1`，动态分配端口，等待 `/readyz`，运行后销毁容器。可指定 `-Demulator.image=自定义镜像名:版本`；验证已启动服务用 `-Demulator.endpoint=http://127.0.0.1:8080`。
 
 ```java
 try (GenericContainer<?> mc = new GenericContainer<>(
-        DockerImageName.parse("maxcompute/maxcompute-emulator:1.2.0"))
+        DockerImageName.parse("maxcompute/maxcompute-emulator:1.2.1"))
         .withExposedPorts(8080)
         .waitingFor(Wait.forHttp("/readyz"))) {
     mc.start();
@@ -103,7 +103,7 @@ v1 Testcontainers 的模式保留，但就绪条件改为 HTTP `/readyz`，无�
 | 会话 | 默认 TTL 30 分钟；完成/过期后不可恢复；仅运行期间有效 |
 | Arrow 分页 | Tunnel 单响应一批；指定 raw_size 时最多65,536行且至少返回一行；不指定则返回请求范围；Storage 按 MaxBatchRows 输出多批 |
 | 资源/函数 | 资源上传（单次 payload 或 Java SDK 分片+合并）、元数据读取、按 `rOffset`/`rSize` 下载、覆盖、删除、前缀与分页列举；TABLE 资源元数据；引用已存在资源的 Java/SQL/内嵌函数注册 |
-| 增量读取 | ACID 表（主键 + `transactional` 或 format-version 2 属性）按版本区间 `(StartVersion, EndVersion]` 读取变更事件，支持 `append`/`cdc` 两种模式：cdc 读只追加的事件历史，append 读当前活行（同一窗口内先插入后被删除的行不出现在 `append`，但 `cdc` 会同时给出它的插入(2)与删除(4)两个事件）；会话返回 `LatestVersion` 供消费者推进游标（`EndVersion` 超过会话固定版本时直接拒绝 `400`/`InvalidParameter`——11-12 在真实项目实测：版本 2 的 ACID 表上 `(0,2]` 正常回两条事件，`(0,3]` 与 `(0,1002]` 都报 `The query version exceeded timetravel range`；模拟器不把表从未到达的数字交给消费者当游标，否则到该边界为止的所有版本都会落到游标后面永久漏读。`StartVersion` 超过该版本同样拒绝；区间倒置也拒绝，这一点与真机不同——同一实测里真机接受 `(2,1]` 并回空窗口、版本取 1。11-14 再顺着客户端异常链读到位：真机是 `400` + 错误码 `InvalidArgument`（`IOException` 之下的 `OdpsException` 带 status 与 code）。状态码与模拟器一致；错误码字符串故意保持 `InvalidParameter`——那是存储面通用的非法值家族（非测试 79 处），`InvalidArgument` 全仓一处没有，只为这一格改成服务的码会把家族拆开，差异明写在文档），事件带 `__meta_op_type`（tinyint：2 插入、4 删除、32 更新后像, 16 更新前像, 活行上是 8）与 `__meta_timestamp`；时间窗（`StartTimeStamp`/`EndTimeStamp`）与 `StartTxnId` 明确拒绝。存储面（v1/v2 会话）上「模拟器不提供该能力」这一类拒绝一律回 `405`/`MethodNotAllowed`（2026-11-04 与 maintainer 决定统一，含未知 WriteMode、过滤下推、物理分片计划、编解码与 Arrow 格式/版本、零批量大小），值本身不合法仍是 `400`/`InvalidParameter`；两个方向都由用例钉住。op 取值与 `append`/`cdc` 对“先插入后删除”的呈现已在真实项目实测对齐（同一窗口 cdc 读到 `[2:2, 2:4, 1:2, 1:16, 1:32]`、append 只读到 `[1:8]`）; 未实测的是 8 与 32 的区分规则与并发写入下的事件顺序。版本发现走 `SELECT get_latest_version(project[.schema].table)`，它回的数字与会话的 `LatestVersion` 同源；行级版本号、操作与提交时间藏在每行旁边，任何用户可见的投影都看不到它们，`INSERT ... SELECT *` 从 delta 表取数的暂存快照也一样——因此复制到另一张 ACID 表或对同一张表自覆盖都可用，复制出的每一行在目标表事件历史里取自己的版本；源是集合运算时同理——暂存表一次性跑完整段源查询，所以每个 `SELECT * FROM <表>` 分支都在 `UNION`/`INTERSECT`/`EXCEPT` 比较整行之前先投影成该表的声明列（按物理行去重会把同一用户行按版本重复计），归不到单一关系的星号（集合运算里带 join 或子查询）明确拒绝 `UnsupportedFeature` 而不给结果；源里没有 delta 表则完全保持原行为 |
+| 增量读取 | ACID 表（主键 + `transactional` 或 format-version 2 属性）按版本区间 `(StartVersion, EndVersion]` 读取变更事件，支持 `append`/`cdc` 两种模式：cdc 读只追加的事件历史，append 读当前活行（同一窗口内先插入后被删除的行不出现在 `append`，但 `cdc` 会同时给出它的插入(2)与删除(4)两个事件）；会话返回 `LatestVersion` 供消费者推进游标（`EndVersion` 超过会话固定版本时直接拒绝 `400`/`InvalidParameter`——11-12 在真实项目实测：版本 2 的 ACID 表上 `(0,2]` 正常回两条事件，`(0,3]` 与 `(0,1002]` 都报 `The query version exceeded timetravel range`；11-14 再顺着这条异常的客户端 cause chain 读到位，真机对越界窗口同样是拒绝，回的是 `400` + 错误码 `InvalidArgument`（`IOException` 之下的 `OdpsException` 带 status 与 code）——状态码与模拟器一致，错误码字符串故意保持 `InvalidParameter`，那是存储面通用的非法值家族（非测试 79 处），`InvalidArgument` 全仓一处没有，只为那一格改成服务的码会把家族拆开，差异明写在文档。模拟器不把表从未到达的数字交给消费者当游标，否则到该边界为止的所有版本都会落到游标后面永久漏读。`StartVersion` 超过该版本同样拒绝。区间倒置是另一种差异，真机在那里并不拒绝——同一实测里真机接受 `(2,1]` 并回空窗口、版本取 1，而模拟器拒绝，不肯返回一个低于读者自身起点的游标），事件带 `__meta_op_type`（tinyint：2 插入、4 删除、32 更新后像, 16 更新前像, 活行上是 8）与 `__meta_timestamp`；时间窗（`StartTimeStamp`/`EndTimeStamp`）与 `StartTxnId` 明确拒绝。存储面（v1/v2 会话）上「模拟器不提供该能力」这一类拒绝一律回 `405`/`MethodNotAllowed`（2026-11-04 与 maintainer 决定统一，含未知 WriteMode、过滤下推、物理分片计划、编解码与 Arrow 格式/版本、零批量大小），值本身不合法仍是 `400`/`InvalidParameter`；两个方向都由用例钉住。op 取值与 `append`/`cdc` 对“先插入后删除”的呈现已在真实项目实测对齐（同一窗口 cdc 读到 `[2:2, 2:4, 1:2, 1:16, 1:32]`、append 只读到 `[1:8]`）; 未实测的是 8 与 32 的区分规则与并发写入下的事件顺序。版本发现走 `SELECT get_latest_version(project[.schema].table)`，它回的数字与会话的 `LatestVersion` 同源；行级版本号、操作与提交时间藏在每行旁边，任何用户可见的投影都看不到它们，`INSERT ... SELECT *` 从 delta 表取数的暂存快照也一样——因此复制到另一张 ACID 表或对同一张表自覆盖都可用，复制出的每一行在目标表事件历史里取自己的版本；源是集合运算时同理——暂存表一次性跑完整段源查询，所以每个 `SELECT * FROM <表>` 分支都在 `UNION`/`INTERSECT`/`EXCEPT` 比较整行之前先投影成该表的声明列（按物理行去重会把同一用户行按版本重复计），归不到单一关系的星号（集合运算里带 join 或子查询）明确拒绝 `UnsupportedFeature` 而不给结果；源里没有 delta 表则完全保持原行为 |
 | 不支持 | Storage v1 写入/物理分片、Volume/Blob、按时间窗或事务号续读的增量读取、过滤表达式下推、UDF 执行（函数只有元数据，SQL `CREATE FUNCTION`/`DROP FUNCTION` 与调用 UDF 返回 `UnsupportedFeature`）、Volume 资源、授权模拟、异步 SQL、完整 ODPS 函数库/隐式转换语义 |
 
 资源 payload 上限 64 MiB/个、512 MiB/project+schema；资源名与函数名按大小写不敏感解析，回读保留上传时的大小写。
@@ -116,7 +116,7 @@ DATETIME/TIMESTAMP 常量、STRING cast、ARRAY 构造与 NAMED_STRUCT 有显式
 改动它们是契约决策，不是文档修订。决策落地之前，本节就是跟踪清单——若你的实测与某一行的读数冲突，
 请带两侧读数和 request id 开 issue。
 
-两格描述的是 1.1.0 之后、1.2.0 保留的实现；旧的 1.1.0 镜像不在这两格里。2026-10-08 直接对 `maxcompute/maxcompute-emulator:1.1.0`（digest `sha256:57d1d25757255a1f16d0a3c34ef8b99c24bf8615e1c14c13dfd5a41026dee2d3`）复核：`GET /projects/<project>/resources` 回 `404` + `UnsupportedOperation: unsupported endpoint`，`/capabilities` 既未声明 `resources` 也未声明 `functions`；当前 PyODPS 契约探针打在该镜像上收尾是 `1 passed, 32 failed`，唯一通过的那格也是因为整个端点被拒才通过。这与 2026-09-21 打在 `1.1.0` 源码构建上的 `1 passed, 29 failed` 同形——用例数随探针增长，"能力不存在"这个答复没变。也就是说 `1.1.0` 上根本没有这两格可比的对象：要用资源面请从源码构建，或等 `1.1.0` 之后的 tag。
+两格描述的是 1.1.0 之后、1.2.1 保留的实现；旧的 1.1.0 镜像不在这两格里。2026-10-08 直接对 `maxcompute/maxcompute-emulator:1.1.0`（digest `sha256:57d1d25757255a1f16d0a3c34ef8b99c24bf8615e1c14c13dfd5a41026dee2d3`）复核：`GET /projects/<project>/resources` 回 `404` + `UnsupportedOperation: unsupported endpoint`，`/capabilities` 既未声明 `resources` 也未声明 `functions`；当前 PyODPS 契约探针打在该镜像上收尾是 `1 passed, 32 failed`，唯一通过的那格也是因为整个端点被拒才通过。这与 2026-09-21 打在 `1.1.0` 源码构建上的 `1 passed, 29 failed` 同形——用例数随探针增长，"能力不存在"这个答复没变。也就是说 `1.1.0` 上根本没有这两格可比的对象：要用资源面请从源码构建，或等 `1.1.0` 之后的 tag。
 
 ### 1. 被拒绝的分片合并，状态码与错误码不同
 
@@ -195,7 +195,7 @@ go test ./...
 go run ./cmd/emulator --seed examples/seed.sql
 
 # 标准 Linux Docker 源码构建（CGO 开启）
-docker build --platform linux/amd64 -t maxcompute/maxcompute-emulator:1.2.0 .
+docker build --platform linux/amd64 -t maxcompute/maxcompute-emulator:1.2.1 .
 
 # 镜像加载/构建后，真实 Java SDK 容器验收
 mvn -B -f tests/java/pom.xml test
